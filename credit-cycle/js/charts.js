@@ -23,6 +23,64 @@ const TIME_SCALE = [
 
 const CURRENT_COLOR = '#c0392b';
 const REF_LINE_COLOR = '#9aa5b1';
+const RECESSION_COLOR = 'rgba(90, 90, 100, 0.12)';
+
+// 이동 속도 색상(0=느림 → 1=빠름)
+const SPEED_SCALE = [
+  [0, '#eef1f4'],
+  [0.5, '#e8a33d'],
+  [1, '#b0242c'],
+];
+
+/** USREC 침체 구간을 시계열 그래프용 회색 배경 shape 배열로 변환한다. */
+function recessionShapes(periods) {
+  return (periods || []).map((p) => ({
+    type: 'rect', xref: 'x', yref: 'paper', x0: p.start, x1: p.end, y0: 0, y1: 1,
+    fillcolor: RECESSION_COLOR, line: { width: 0 }, layer: 'below',
+  }));
+}
+
+/**
+ * 색상 기준(시간/속도)에 따라 marker 설정을 만든다.
+ * opts.colorMode: 'time'(기본) | 'speed'. speed일 때는 opts.speeds 배열 필요.
+ */
+function buildTrajectoryMarker(opts, idx, n, mobile, yearMarks, labels) {
+  const base = {
+    size: opts.markerSize,
+    line: { width: 0.5, color: 'rgba(255,255,255,0.8)' },
+    opacity: 0.9,
+    showscale: !mobile && n >= 2,
+  };
+  if (opts.colorMode === 'speed' && opts.speeds && opts.speeds.length === n) {
+    const maxSpeed = Math.max(...opts.speeds, 1e-9);
+    return {
+      ...base,
+      color: opts.speeds,
+      colorscale: SPEED_SCALE,
+      cmin: 0,
+      cmax: maxSpeed,
+      colorbar: mobile || n < 2 ? undefined : {
+        thickness: 10, len: 0.6, outlinewidth: 0,
+        tickvals: [0, maxSpeed],
+        ticktext: ['느림', '빠름'],
+        tickfont: { size: 10, color: COLORS.muted },
+      },
+    };
+  }
+  return {
+    ...base,
+    color: idx,
+    colorscale: TIME_SCALE,
+    cmin: 0,
+    cmax: Math.max(n - 1, 1),
+    colorbar: mobile || n < 2 ? undefined : {
+      thickness: 10, len: 0.75, outlinewidth: 0,
+      tickvals: yearMarks.map((m) => m.index),
+      ticktext: yearMarks.map((m) => `${m.year}년`),
+      tickfont: { size: 10, color: COLORS.muted },
+    },
+  };
+}
 
 /**
  * 궤적 위에 표시할 "연도 라벨" 지점을 고른다.
@@ -78,7 +136,7 @@ const config = () => ({ ...BASE_CONFIG, displayModeBar: isMobile() ? false : 'ho
  * 시간 변화 선 그래프 (상단 두 그래프 공용)
  * @param {HTMLElement} el
  * @param {{date:string}[]} points
- * @param {{accessor:(p)=>number, label:string, digits:number, color?:string, freq:string}} opts
+ * @param {{accessor:(p)=>number, label:string, digits:number, color?:string, freq:string, recessions?:{start:string,end:string}[]}} opts
  */
 export function renderTimeSeries(el, points, opts) {
   const mobile = isMobile();
@@ -95,6 +153,7 @@ export function renderTimeSeries(el, points, opts) {
   layout.xaxis = { ...layout.xaxis, type: 'date' };
   layout.yaxis = { ...layout.yaxis, title: { text: mobile ? '' : opts.label, font: { size: 11, color: COLORS.muted } } };
   layout.hovermode = 'x';
+  layout.shapes = recessionShapes(opts.recessions);
   return Plotly.react(el, [trace], layout, config());
 }
 
@@ -117,6 +176,7 @@ export function renderTrajectory(el, points, opts, overlays = {}) {
     type, mode: 'lines', x: xs, y: ys,
     line: { color: COLORS.path, width: 1 },
     hoverinfo: 'skip',
+    showlegend: false,
   };
 
   const yearMarks = pickYearMarks(points);
@@ -131,25 +191,11 @@ export function renderTrajectory(el, points, opts, overlays = {}) {
   const dots = {
     type, mode: 'markers', x: xs, y: ys,
     customdata: labels,
-    marker: {
-      size: opts.markerSize,
-      color: idx,
-      colorscale: TIME_SCALE,
-      cmin: 0,
-      cmax: Math.max(n - 1, 1),
-      line: { width: 0.5, color: 'rgba(255,255,255,0.8)' },
-      opacity: 0.9,
-      colorbar: mobile || n < 2 ? undefined : {
-        thickness: 10, len: 0.75, outlinewidth: 0,
-        tickvals: yearMarks.map((m) => m.index),
-        ticktext: yearMarks.map((m) => `${m.year}년`),
-        tickfont: { size: 10, color: COLORS.muted },
-      },
-      showscale: !mobile && n >= 2,
-    },
+    marker: buildTrajectoryMarker(opts, idx, n, mobile, yearMarks, labels),
     hovertemplate:
       `%{customdata}<br>X (${opts.xShort}): %{x:.${opts.xDigits}f}` +
       `<br>Y (${opts.yShort}): %{y:.${opts.yDigits}f}<extra></extra>`,
+    showlegend: false,
   };
 
   // 가장 최근 시점: 큰 점으로 강조해 "지금 위치"를 바로 찾을 수 있게 한다.
@@ -158,6 +204,7 @@ export function renderTrajectory(el, points, opts, overlays = {}) {
     customdata: [labels[n - 1]],
     marker: { size: Math.max(opts.markerSize + 7, 14), color: CURRENT_COLOR, line: { width: 2, color: '#ffffff' }, symbol: 'circle' },
     hovertemplate: `현재 (%{customdata})<br>X: %{x:.${opts.xDigits}f}<br>Y: %{y:.${opts.yDigits}f}<extra></extra>`,
+    showlegend: false,
   };
 
   const layout = baseLayout(mobile);
@@ -185,6 +232,16 @@ export function renderTrajectory(el, points, opts, overlays = {}) {
 
   layout.shapes = [...refLine, ...(overlays.shapes || [])];
   layout.annotations = [...refAnnotation, ...(overlays.annotations || [])];
+
+  // 이벤트 강조선처럼 이름이 있는 오버레이 trace가 있으면 범례를 켠다.
+  const hasNamedOverlay = (overlays.traces || []).some((t) => t.name);
+  if (hasNamedOverlay) {
+    layout.showlegend = true;
+    layout.legend = {
+      orientation: 'h', x: 0, y: 1.02, yanchor: 'bottom', xanchor: 'left',
+      font: { size: 10, color: COLORS.muted }, bgcolor: 'rgba(255,255,255,0)',
+    };
+  }
 
   return Plotly.react(el, [path, yearDots, dots, current, ...(overlays.traces || [])], layout, config());
 }

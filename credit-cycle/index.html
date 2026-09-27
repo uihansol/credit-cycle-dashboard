@@ -20,6 +20,8 @@
         <span>V2: Baa−10Y × 10Y/2Y</span>
         <span class="masthead__sep" aria-hidden="true">|</span>
         <span>V4: Baa/Aaa × 10Y/2Y</span>
+        <span class="masthead__sep" aria-hidden="true">|</span>
+        <span>V6: 하이일드 OAS × 10Y/2Y</span>
       </p>
     </header>
 
@@ -48,6 +50,28 @@
         <button type="button" id="reload" class="button">데이터 불러오기</button>
         <span id="status" class="status" role="status" aria-live="polite"></span>
       </div>
+      <p id="version-note" class="version-note" hidden></p>
+
+      <div class="field field--full range-row">
+        <span class="field__label">빠른 기간 선택</span>
+        <div id="range-buttons" class="chip-row"></div>
+      </div>
+
+      <div class="field field--full display-options">
+        <span class="field__label">표시 옵션</span>
+        <div class="option-row">
+          <label class="option"><input type="checkbox" id="opt-recession"> 경기침체 음영 (NBER)</label>
+          <label class="option"><input type="checkbox" id="opt-phases"> 4단계 국면 배경</label>
+          <label class="option"><input type="checkbox" id="opt-events"> 주요 시기 표시</label>
+          <label class="option option--select">
+            궤적 색상 기준
+            <select id="color-mode">
+              <option value="time">시간(연도)</option>
+              <option value="speed">이동 속도</option>
+            </select>
+          </label>
+        </div>
+      </div>
     </section>
 
     <div id="notice" class="notice" role="alert" hidden></div>
@@ -59,9 +83,10 @@
       </header>
       <div id="chart-trajectory" class="chart chart--large"></div>
       <p class="chart-panel__note">
-        점 색이 진할수록 최근 시점입니다 (오른쪽 색상 막대에 연도 표시).
+        점 색이 진할수록 최근 시점입니다 (오른쪽 색상 막대에 연도 또는 이동 속도 표시).
         굵은 테두리만 있는 점은 각 연도의 시작 지점, <span class="legend-dot legend-dot--current"></span>빨간 점은 가장 최근 값입니다.
-        점선은 장단기금리차 역전 기준선(10Y=2Y)입니다. 드래그로 확대, 더블클릭으로 원래 크기로 돌아갑니다.
+        점선은 장단기금리차 역전 기준선(10Y=2Y)입니다. 국면 배경·주요 시기 표시는 위 "표시 옵션"에서 켤 수 있습니다.
+        드래그로 확대, 더블클릭으로 원래 크기로 돌아갑니다.
       </p>
     </article>
 
@@ -81,6 +106,7 @@
         <div id="chart-y" class="chart chart--small"></div>
       </article>
     </section>
+    <p class="grid-2-note">회색 음영은 NBER이 판정한 경기침체 구간입니다 (표시 옵션에서 끌 수 있음).</p>
 
     <section id="cards" class="stats" aria-label="현재 지표"></section>
 

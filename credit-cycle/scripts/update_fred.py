@@ -35,18 +35,31 @@ API_KEY = os.environ.get("FRED_API_KEY", "").strip()
 
 MONTHLY_START = "1976-06-01"   # GS2 시작 시점
 DAILY_START = "1986-01-02"     # DBAA/DAAA 시작 시점
+HY_START = "1996-12-31"        # BAMLH0A0HYM2(하이일드 OAS) 시작 시점
+RECESSION_START = "1976-01-01"  # USREC — 우리 대시보드의 공통 시작보다 넉넉히 이르게
 
-SERIES = {
-    # 월간
-    "BAA": MONTHLY_START,
-    "AAA": MONTHLY_START,
-    "GS10": MONTHLY_START,
-    "GS2": MONTHLY_START,
-    # 일간
-    "DBAA": DAILY_START,
-    "DAAA": DAILY_START,
-    "DGS10": DAILY_START,
-    "DGS2": DAILY_START,
+# key(파일명) → { fred_id, start, fq?, fam? }
+#   fq/fam 은 fredgraph.csv·FRED API의 빈도 변환 옵션이다.
+#   (fq="Monthly", fam="avg") 를 주면 일간 시리즈를 FRED가 직접 월평균해서 내려준다.
+SERIES: dict[str, dict] = {
+    # 월간 — Moody's 회사채 / 국채
+    "BAA": {"fred_id": "BAA", "start": MONTHLY_START},
+    "AAA": {"fred_id": "AAA", "start": MONTHLY_START},
+    "GS10": {"fred_id": "GS10", "start": MONTHLY_START},
+    "GS2": {"fred_id": "GS2", "start": MONTHLY_START},
+    # 일간 — 위와 동일 시리즈의 일간 버전
+    "DBAA": {"fred_id": "DBAA", "start": DAILY_START},
+    "DAAA": {"fred_id": "DAAA", "start": DAILY_START},
+    "DGS10": {"fred_id": "DGS10", "start": DAILY_START},
+    "DGS2": {"fred_id": "DGS2", "start": DAILY_START},
+    # 하이일드 스프레드 (ICE BofA US High Yield Index OAS). 원천은 일간뿐이라
+    # 월간판은 FRED에 월평균 변환을 요청해서 만든다.
+    # 주의: FRED가 2026-04부터 이 시리즈를 최근 3년치만 공개하도록 정책을 바꿔서,
+    #       start를 이보다 이르게 줘도 실제로는 최근 3년치만 내려온다.
+    "HY": {"fred_id": "BAMLH0A0HYM2", "start": HY_START},
+    "HYM": {"fred_id": "BAMLH0A0HYM2", "start": HY_START, "fq": "Monthly", "fam": "avg"},
+    # NBER 경기침체 판정 (0/1, 월간) — 침체 음영 표시용
+    "USREC": {"fred_id": "USREC", "start": RECESSION_START},
 }
 
 HEADERS = {"User-Agent": "credit-cycle-dashboard/1.0 (GitHub Actions)"}
@@ -87,26 +100,35 @@ def parse_fred_csv(text: str, series_id: str) -> dict[str, str]:
     return out
 
 
-def fetch_fredgraph(series_id: str, start: str) -> dict[str, str]:
-    q = urllib.parse.urlencode({"id": series_id, "cosd": start})
-    return parse_fred_csv(http_get(f"https://fred.stlouisfed.org/graph/fredgraph.csv?{q}"), series_id)
+def fetch_fredgraph(meta: dict, start: str) -> dict[str, str]:
+    params = {"id": meta["fred_id"], "cosd": start}
+    if meta.get("fq"):
+        params["fq"] = meta["fq"]
+    if meta.get("fam"):
+        params["fam"] = meta["fam"]
+    q = urllib.parse.urlencode(params)
+    return parse_fred_csv(http_get(f"https://fred.stlouisfed.org/graph/fredgraph.csv?{q}"), meta["fred_id"])
 
 
-def fetch_api(series_id: str, start: str) -> dict[str, str]:
-    q = urllib.parse.urlencode({
-        "series_id": series_id,
+def fetch_api(meta: dict, start: str) -> dict[str, str]:
+    params = {
+        "series_id": meta["fred_id"],
         "api_key": API_KEY,
         "file_type": "json",
         "observation_start": start,
-    })
+    }
+    if meta.get("fq") == "Monthly":
+        params["frequency"] = "m"
+        params["aggregation_method"] = meta.get("fam", "avg")
+    q = urllib.parse.urlencode(params)
     payload = json.loads(http_get(f"https://api.stlouisfed.org/fred/series/observations?{q}"))
     if "observations" not in payload:
-        raise RuntimeError(f"{series_id}: API 오류 응답: {str(payload)[:200]}")
+        raise RuntimeError(f"{meta['fred_id']}: API 오류 응답: {str(payload)[:200]}")
     return {o["date"]: normalize(o["value"]) for o in payload["observations"]}
 
 
-def fetch(series_id: str, start: str) -> dict[str, str]:
-    return fetch_api(series_id, start) if API_KEY else fetch_fredgraph(series_id, start)
+def fetch(meta: dict, start: str) -> dict[str, str]:
+    return fetch_api(meta, start) if API_KEY else fetch_fredgraph(meta, start)
 
 
 def normalize(value: str) -> str:
@@ -159,8 +181,9 @@ def summarize(rows: dict[str, str]) -> dict:
 
 
 # ---------------------------------------------------------------- 메인
-def update_series(series_id: str, start: str, fetcher=None, today: date | None = None) -> dict:
+def update_series(series_id: str, meta: dict, fetcher=None, today: date | None = None) -> dict:
     fetcher = fetcher or fetch
+    start = meta["start"]
     path = DATA_DIR / f"{series_id}.csv"
     existing = {} if FULL_REFRESH else read_csv(path)
     has_values = any(v for v in existing.values())
@@ -174,7 +197,7 @@ def update_series(series_id: str, start: str, fetcher=None, today: date | None =
         mode = f"전체 ({since}~)"
 
     print(f"[{series_id}] {mode} 다운로드", flush=True)
-    fresh = {d: normalize(v) for d, v in fetcher(series_id, since).items()}
+    fresh = {d: normalize(v) for d, v in fetcher(meta, since).items()}
     if not any(v for v in fresh.values()):
         if has_values:
             print("    경고: 새 데이터가 비어 있음 → 기존 파일 유지", flush=True)
@@ -196,9 +219,9 @@ def main() -> int:
 
     meta_series: dict[str, dict] = {}
     failures: list[str] = []
-    for sid, start in SERIES.items():
+    for sid, meta in SERIES.items():
         try:
-            meta_series[sid] = update_series(sid, start)
+            meta_series[sid] = update_series(sid, meta)
         except Exception as e:  # noqa: BLE001
             print(f"[{sid}] 실패: {e}", file=sys.stderr, flush=True)
             failures.append(sid)

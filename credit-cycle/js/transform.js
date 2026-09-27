@@ -3,47 +3,66 @@
 // ============================================================
 
 /**
- * 네 시계열이 같은 날짜에 모두 존재하는 관측치만 남긴다. 날짜 오름차순.
+ * 시계열들을 날짜 기준으로 합친다. required 키가 모두 있는 날짜만 행으로 남기고,
+ * optional 키는 없으면 null로 채운다 (그 값을 쓰는 버전에서만 자연히 제외됨).
+ * 이렇게 하면 하이일드처럼 시작일이 늦은 지표를 추가해도 기존 지표의 과거 구간이
+ * 잘려나가지 않는다. required 를 생략하면 이전처럼 모든 키를 필수로 취급한다.
  * @param {Record<string, Map<string, number|null>>} maps
- * @returns {{date:string, BAA:number, AAA:number, GS10:number, GS2:number}[]}
+ * @param {string[]} [required] 값이 없으면 그 날짜를 제외할 키 (기본: 전체 키)
+ * @returns {{date:string, [key:string]: number|null}[]}
  */
-export function alignSeries(maps) {
+export function alignSeries(maps, required = null) {
   const keys = Object.keys(maps);
-  const base = maps[keys[0]];
+  const req = required || keys;
+  const optional = keys.filter((k) => !req.includes(k));
+  const base = maps[req[0]];
   const rows = [];
   for (const [date, v0] of base) {
     if (v0 === null || !Number.isFinite(v0)) continue;
-    const row = { date, [keys[0]]: v0 };
+    const row = { date, [req[0]]: v0 };
     let ok = true;
-    for (let k = 1; k < keys.length; k++) {
-      const v = maps[keys[k]].get(date);
+    for (let i = 1; i < req.length; i++) {
+      const v = maps[req[i]].get(date);
       if (v === null || v === undefined || !Number.isFinite(v)) { ok = false; break; }
-      row[keys[k]] = v;
+      row[req[i]] = v;
     }
-    if (ok) rows.push(row);
+    if (!ok) continue;
+    for (const k of optional) {
+      const v = maps[k].get(date);
+      row[k] = v === null || v === undefined || !Number.isFinite(v) ? null : v;
+    }
+    rows.push(row);
   }
   rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
   return rows;
 }
 
 /**
- * 월간 정렬 데이터 → 연평균. date는 'YYYY'. months = 평균에 쓰인 개월 수.
+ * 월간 정렬 데이터 → 연평균. date는 'YYYY'. months = 관측치 자체 개월 수(분모 아님).
+ * 키별로 실제 값이 있는 달만 평균에 넣는다 (하이일드처럼 뒤늦게 시작하는 지표가
+ * 섞여 있어도 앞선 연도의 다른 지표 평균이 깨지지 않는다). 값이 하나도 없는 키는
+ * 그 연도에서 null.
  */
-export function aggregateAnnualMean(rows, keys = ['BAA', 'AAA', 'GS10', 'GS2']) {
+export function aggregateAnnualMean(rows, keys = ['BAA', 'AAA', 'GS10', 'GS2', 'HY']) {
   const byYear = new Map();
   for (const r of rows) {
     const y = r.date.slice(0, 4);
-    if (!byYear.has(y)) byYear.set(y, { n: 0, sums: Object.fromEntries(keys.map((k) => [k, 0])) });
+    if (!byYear.has(y)) byYear.set(y, { n: 0, sums: {}, counts: {} });
     const g = byYear.get(y);
     g.n += 1;
-    for (const k of keys) g.sums[k] += r[k];
+    for (const k of keys) {
+      const v = r[k];
+      if (v === null || v === undefined || !Number.isFinite(v)) continue;
+      g.sums[k] = (g.sums[k] || 0) + v;
+      g.counts[k] = (g.counts[k] || 0) + 1;
+    }
   }
   return [...byYear.entries()]
     .sort(([a], [b]) => (a < b ? -1 : 1))
     .map(([y, g]) => ({
       date: y,
       months: g.n,
-      ...Object.fromEntries(keys.map((k) => [k, g.sums[k] / g.n])),
+      ...Object.fromEntries(keys.map((k) => [k, g.counts[k] ? g.sums[k] / g.counts[k] : null])),
     }));
 }
 
@@ -95,9 +114,53 @@ export function summarize(points) {
   return { count: points.length, first, last };
 }
 
+/**
+ * NBER USREC(0/1, 월간) 원자료에서 연속된 침체 구간의 [시작,끝] 날짜 목록을 뽑는다.
+ * 끝 날짜는 그 달의 말일로 잡는다 (그래프에서 침체 종료월 전체를 덮도록).
+ * @param {{date:string, USREC:number|null}[]} rows  월간 정렬 데이터 (USREC 키 포함)
+ * @returns {{start:string, end:string}[]}
+ */
+export function computeRecessionPeriods(rows) {
+  const periods = [];
+  let open = null;
+  for (let i = 0; i < rows.length; i++) {
+    const on = rows[i].USREC === 1;
+    if (on && !open) open = rows[i].date;
+    if (!on && open) { periods.push({ start: open, end: monthEnd(rows[i - 1].date) }); open = null; }
+  }
+  if (open) periods.push({ start: open, end: monthEnd(rows[rows.length - 1].date) });
+  return periods;
+}
+function monthEnd(date) {
+  const [y, m] = date.slice(0, 7).split('-').map(Number);
+  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(last).padStart(2, '0')}`;
+}
+
+/**
+ * 구간별 "이동 속도": 직전 점 대비 (x,y) 변화량을, 표시 중인 전체 범위로 정규화한
+ * 유클리드 거리로 환산한다. 값이 클수록 궤적이 빠르게 움직이는 구간이다.
+ * 첫 점의 속도는 둘째 점과 동일하게 채워 배열 길이를 points와 맞춘다.
+ * @param {{x:number,y:number}[]} points
+ * @returns {number[]}
+ */
+export function computeSpeeds(points) {
+  if (points.length < 2) return points.map(() => 0);
+  const xs = points.map((p) => p.x), ys = points.map((p) => p.y);
+  const span = (arr) => Math.max(...arr) - Math.min(...arr) || 1;
+  const xSpan = span(xs), ySpan = span(ys);
+  const speeds = [0];
+  for (let i = 1; i < points.length; i++) {
+    const dx = (points[i].x - points[i - 1].x) / xSpan;
+    const dy = (points[i].y - points[i - 1].y) / ySpan;
+    speeds.push(Math.sqrt(dx * dx + dy * dy));
+  }
+  speeds[0] = speeds[1] ?? 0;
+  return speeds;
+}
+
 // ------------------------------------------------------------
 // [확장 지점] 향후 분석 함수는 여기에 순수 함수로 추가한다.
-//  - classifyPhase(points)       : 4단계 국면(#1 위험 ~ #4 둔화) 판정
 //  - findSimilarPeriods(points, target, k) : 현재와 비슷한 과거 위치 탐색
 //  - pointAt(points, date)       : 특정 날짜의 X/Y 조회
 // ------------------------------------------------------------

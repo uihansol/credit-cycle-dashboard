@@ -2,13 +2,13 @@
 // app.js — 상태 관리 + UI 연결 (진입점)
 // ============================================================
 import {
-  FREQUENCIES, VERSIONS, Y_AXIS,
+  FREQUENCIES, VERSIONS, Y_AXIS, REQUIRED_KEYS, RECESSION_FILE,
   DEFAULT_FREQ, DEFAULT_VERSION, DEFAULT_MARKER_SIZE,
 } from './config.js';
 import { loadSeries, loadMeta, DataLoadError } from './data-loader.js';
 import {
   alignSeries, aggregateAnnualMean, filterByDate, computePoints,
-  formatDateLabel, summarize,
+  formatDateLabel, summarize, computeRecessionPeriods, computeSpeeds, toAxisDate,
 } from './transform.js';
 import {
   renderTimeSeries, renderTrajectory, setTrajectoryMarkerSize, clearChart, COLORS,
@@ -23,20 +23,29 @@ const state = {
   end: '',
   endAuto: true,          // 사용자가 종료일을 직접 바꾸기 전까지 최신일을 따라감
   markerSize: DEFAULT_MARKER_SIZE,
-  rows: {},               // freq → 정렬된 원자료 행
-  latest: {},             // freq → 마지막 관측 날짜 (YYYY-MM-DD)
-  features: {},           // 향후 확장 기능 on/off (overlays.js 참고)
+  colorMode: 'time',       // 'time' | 'speed' — 궤적 점 색상 기준
+  rows: {},                // freq → 정렬된 원자료 행
+  latest: {},              // freq → 마지막 관측 날짜 (YYYY-MM-DD)
+  recessionPeriods: null,  // USREC에서 뽑은 [{start,end}] (빈도와 무관, 한 번만 로드)
+  features: { recession: true, phases: false, events: false }, // 표시 옵션 on/off
 };
+
+const RANGE_BUTTONS = [
+  { label: '1년', years: 1 }, { label: '3년', years: 3 }, { label: '5년', years: 5 },
+  { label: '10년', years: 10 }, { label: '전체', years: null },
+];
 
 // ------------------------------------------------------------ DOM
 const $ = (id) => document.getElementById(id);
 const el = {
   version: $('version'), freq: $('freq'), start: $('start'), end: $('end'),
   size: $('marker-size'), sizeOut: $('marker-size-out'), reload: $('reload'),
-  notice: $('notice'), status: $('status'),
+  notice: $('notice'), status: $('status'), versionNote: $('version-note'),
   xTitle: $('x-chart-sub'), chartX: $('chart-x'), chartY: $('chart-y'),
   chartTraj: $('chart-trajectory'), trajSub: $('trajectory-sub'),
-  cards: $('cards'), meta: $('data-meta'),
+  cards: $('cards'), meta: $('data-meta'), rangeButtons: $('range-buttons'),
+  optRecession: $('opt-recession'), optPhases: $('opt-phases'),
+  optEvents: $('opt-events'), colorMode: $('color-mode'),
 };
 
 // ------------------------------------------------------------ 알림
@@ -65,11 +74,25 @@ async function ensureRows(freq, { refresh = false } = {}) {
   if (!refresh && state.rows[freq]) return state.rows[freq];
   const cfg = FREQUENCIES[freq];
   const maps = await loadSeries(cfg.files, { refresh });
-  let rows = alignSeries(maps).filter((r) => r.date >= cfg.minDate);
+  let rows = alignSeries(maps, REQUIRED_KEYS).filter((r) => r.date >= cfg.minDate);
   state.latest[freq] = rows.length ? rows[rows.length - 1].date : '';
   if (cfg.aggregate === 'annualMean') rows = aggregateAnnualMean(rows);
   state.rows[freq] = rows;
   return rows;
+}
+
+/** 경기침체(USREC) 구간은 빈도와 무관하게 한 번만 불러와 캐시한다. */
+async function ensureRecessionPeriods({ refresh = false } = {}) {
+  if (!refresh && state.recessionPeriods) return state.recessionPeriods;
+  try {
+    const maps = await loadSeries(RECESSION_FILE, { refresh });
+    const rows = alignSeries(maps, ['USREC']);
+    state.recessionPeriods = computeRecessionPeriods(rows);
+  } catch (e) {
+    console.warn('경기침체 데이터를 불러오지 못했습니다:', e);
+    state.recessionPeriods = [];
+  }
+  return state.recessionPeriods;
 }
 
 // ------------------------------------------------------------ 날짜 규칙
@@ -102,6 +125,24 @@ function applyDateRules() {
   return true;
 }
 
+/** 기간 단축 버튼: 최근 N년 / 전체. latest가 아직 없으면 조용히 무시. */
+function applyQuickRange(years) {
+  const latest = state.latest[state.freq];
+  const cfg = FREQUENCIES[state.freq];
+  if (!latest) return;
+  if (years === null) {
+    state.start = cfg.minDate;
+  } else {
+    const [y, m, d] = latest.split('-').map(Number);
+    const start = new Date(Date.UTC(y - years, m - 1, d));
+    const iso = start.toISOString().slice(0, 10);
+    state.start = iso < cfg.minDate ? cfg.minDate : iso;
+  }
+  state.end = latest;
+  state.endAuto = true;
+  if (applyDateRules()) render();
+}
+
 // ------------------------------------------------------------ 렌더링
 function currentPoints() {
   const rows = filterByDate(state.rows[state.freq] || [], state.start, state.end);
@@ -114,25 +155,41 @@ function render() {
 
   el.xTitle.textContent = v.xLabel;
   el.trajSub.textContent = `X: ${v.xShort}  ·  Y: ${Y_AXIS.short}  ·  ${FREQUENCIES[state.freq].label}간 자료, 날짜순 연결`;
+  if (v.note) { el.versionNote.textContent = v.note; el.versionNote.hidden = false; }
+  else { el.versionNote.hidden = true; el.versionNote.textContent = ''; }
 
   if (!points.length) {
     [el.chartX, el.chartY, el.chartTraj].forEach(clearChart);
     renderCards(null);
-    showNotice('info', '<p>선택한 기간에 네 지표가 모두 있는 관측치가 없습니다. 기간을 넓혀 보세요.</p>');
+    showNotice('info', `<p>선택한 기간에는 ${v.xShort}·${Y_AXIS.short} 지표가 모두 있는 관측치가 없습니다. 기간을 넓혀 보세요.</p>`);
     return;
   }
 
+  const recessions = state.features.recession ? (state.recessionPeriods || []) : [];
+  const visibleRecessions = recessions
+    .map((p) => ({ start: toAxisDate(p.start), end: toAxisDate(p.end) }))
+    .filter((p) => p.end >= points[0].date && p.start <= points[points.length - 1].date);
+
   renderTimeSeries(el.chartX, points, {
     accessor: (p) => p.x, label: v.xShort, digits: v.digits, freq: state.freq, color: COLORS.xSeries,
+    recessions: visibleRecessions,
   });
   renderTimeSeries(el.chartY, points, {
     accessor: (p) => p.y, label: Y_AXIS.short, digits: Y_AXIS.digits, freq: state.freq, color: COLORS.ySeries,
+    recessions: visibleRecessions,
+  });
+
+  const speeds = state.colorMode === 'speed' ? computeSpeeds(points) : null;
+  const overlays = buildOverlays(points, {
+    version: state.version, freq: state.freq, features: state.features,
+    xDigits: v.digits, yDigits: Y_AXIS.digits,
   });
   renderTrajectory(el.chartTraj, points, {
     freq: state.freq, markerSize: state.markerSize,
     xLabel: v.xLabel, yLabel: Y_AXIS.label, xShort: v.xShort, yShort: Y_AXIS.short,
     xDigits: v.digits, yDigits: Y_AXIS.digits,
-  }, buildOverlays(points, { version: state.version, freq: state.freq, features: state.features }));
+    colorMode: state.colorMode, speeds,
+  }, overlays);
 
   renderCards(points);
 }
@@ -161,8 +218,8 @@ async function loadAndRender({ refresh = false } = {}) {
   el.reload.disabled = true;
   setStatus(refresh ? '저장된 CSV를 다시 읽는 중…' : '저장된 CSV를 읽는 중…');
   try {
-    if (refresh) state.rows = {};
-    await ensureRows(state.freq, { refresh });
+    if (refresh) { state.rows = {}; state.recessionPeriods = null; }
+    await Promise.all([ensureRows(state.freq, { refresh }), ensureRecessionPeriods({ refresh })]);
     if (applyDateRules()) render();
     setStatus('');
     if (refresh) updateMeta();
@@ -197,6 +254,12 @@ function bindControls() {
   el.freq.value = state.freq;
   el.size.value = state.markerSize;
   el.sizeOut.textContent = state.markerSize;
+  el.optRecession.checked = state.features.recession;
+  el.optPhases.checked = state.features.phases;
+  el.optEvents.checked = state.features.events;
+  el.colorMode.value = state.colorMode;
+  el.rangeButtons.innerHTML = RANGE_BUTTONS
+    .map((r) => `<button type="button" class="chip" data-years="${r.years ?? ''}">${r.label}</button>`).join('');
 
   el.version.addEventListener('change', () => {
     state.version = el.version.value;
@@ -208,6 +271,7 @@ function bindControls() {
   });
   el.start.addEventListener('change', () => {
     state.start = el.start.value;
+    state.endAuto = false;
     if (applyDateRules()) render();
   });
   el.end.addEventListener('change', () => {
@@ -221,6 +285,15 @@ function bindControls() {
     setTrajectoryMarkerSize(el.chartTraj, state.markerSize);
   });
   el.reload.addEventListener('click', () => loadAndRender({ refresh: true }));
+  el.rangeButtons.addEventListener('click', (ev) => {
+    const btn = ev.target.closest('button[data-years]');
+    if (!btn) return;
+    applyQuickRange(btn.dataset.years === '' ? null : Number(btn.dataset.years));
+  });
+  el.optRecession.addEventListener('change', () => { state.features.recession = el.optRecession.checked; if (state.rows[state.freq]) render(); });
+  el.optPhases.addEventListener('change', () => { state.features.phases = el.optPhases.checked; if (state.rows[state.freq]) render(); });
+  el.optEvents.addEventListener('change', () => { state.features.events = el.optEvents.checked; if (state.rows[state.freq]) render(); });
+  el.colorMode.addEventListener('change', () => { state.colorMode = el.colorMode.value; if (state.rows[state.freq]) render(); });
 
   let t;
   window.addEventListener('resize', () => {

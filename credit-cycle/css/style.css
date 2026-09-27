@@ -93,6 +93,7 @@ select:focus-visible, input:focus-visible, .button:focus-visible {
 input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 40px; }
 
 .field--action { flex-direction: row; align-items: center; gap: 10px; }
+.field--full { grid-column: 1 / -1; }
 .button {
   font: inherit;
   font-weight: 600;
@@ -109,6 +110,52 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 40px
 .button:hover { background: #173f62; }
 .button:disabled { opacity: 0.55; cursor: progress; }
 .status { font-size: 0.82rem; color: var(--muted); }
+
+.version-note {
+  grid-column: 1 / -1;
+  margin: -4px 0 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+  background: #f4f6f9;
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+}
+
+.range-row, .display-options {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: #eaf1f7;
+  border: 1px solid #d3e2ee;
+  border-radius: 999px;
+  padding: 5px 14px;
+  cursor: pointer;
+}
+.chip:hover { background: #dfeaf3; }
+.chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.option-row { display: flex; flex-wrap: wrap; gap: 10px 20px; align-items: center; }
+.option {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 0.88rem; color: var(--ink); cursor: pointer;
+}
+.option input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px; }
+.option--select { gap: 8px; }
+.option--select select {
+  font: inherit; font-size: 0.85rem; padding: 5px 8px; min-height: 32px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); background: #fff;
+}
+
+.grid-2-note { margin: -6px 2px 0; font-size: 0.78rem; color: var(--muted); }
 
 /* ---------------------------------------------------- 알림 */
 .notice {

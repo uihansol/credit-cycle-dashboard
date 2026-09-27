@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>미국 금리·신용 사이클 탐색기</title>
+  <meta name="description" content="Baa 회사채 스프레드와 10년/2년 국채금리 비율로 본 미국 금리·신용 사이클 궤적">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔄</text></svg>">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+  <link rel="stylesheet" href="./css/style.css">
+  <!-- 그래프 라이브러리만 CDN에서 받는다. 데이터는 ./data/*.csv 에서만 읽는다. -->
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8" defer></script>
+  <script type="module" src="./js/app.js"></script>
+</head>
+<body>
+  <main class="page">
+    <header class="masthead">
+      <h1>미국 금리·신용 사이클 탐색기</h1>
+      <p class="masthead__sub">
+        <span>V2: Baa−10Y × 10Y/2Y</span>
+        <span class="masthead__sep" aria-hidden="true">|</span>
+        <span>V4: Baa/Aaa × 10Y/2Y</span>
+      </p>
+    </header>
+
+    <section class="panel controls" aria-label="분석 조건">
+      <label class="field">
+        <span class="field__label">버전</span>
+        <select id="version"></select>
+      </label>
+      <label class="field field--narrow">
+        <span class="field__label">자료 빈도</span>
+        <select id="freq"></select>
+      </label>
+      <label class="field">
+        <span class="field__label">시작일</span>
+        <input type="date" id="start">
+      </label>
+      <label class="field">
+        <span class="field__label">종료일</span>
+        <input type="date" id="end">
+      </label>
+      <label class="field field--range">
+        <span class="field__label">궤적 점 크기 <output id="marker-size-out">7</output></span>
+        <input type="range" id="marker-size" min="3" max="18" step="1" value="7">
+      </label>
+      <div class="field field--action">
+        <button type="button" id="reload" class="button">데이터 불러오기</button>
+        <span id="status" class="status" role="status" aria-live="polite"></span>
+      </div>
+    </section>
+
+    <div id="notice" class="notice" role="alert" hidden></div>
+
+    <section class="grid-2">
+      <article class="panel chart-panel">
+        <header class="chart-panel__head">
+          <h2>가로축 지표의 시간 변화</h2>
+          <p id="x-chart-sub" class="chart-panel__sub">Baa − 10Y Treasury (%p)</p>
+        </header>
+        <div id="chart-x" class="chart chart--small"></div>
+      </article>
+      <article class="panel chart-panel">
+        <header class="chart-panel__head">
+          <h2>세로축 지표의 시간 변화</h2>
+          <p class="chart-panel__sub">10Y / 2Y Treasury yield ratio</p>
+        </header>
+        <div id="chart-y" class="chart chart--small"></div>
+      </article>
+    </section>
+
+    <article class="panel chart-panel chart-panel--hero">
+      <header class="chart-panel__head">
+        <h2>금리·신용 사이클 궤적</h2>
+        <p id="trajectory-sub" class="chart-panel__sub"></p>
+      </header>
+      <div id="chart-trajectory" class="chart chart--large"></div>
+      <p class="chart-panel__note">점 색이 진할수록 최근 시점입니다. 드래그로 확대, 더블클릭으로 원래 크기로 돌아갑니다.</p>
+    </article>
+
+    <section id="cards" class="stats" aria-label="현재 지표"></section>
+
+    <footer class="footer">
+      <p id="data-meta">데이터 출처: FRED (저장소에 보관된 CSV)</p>
+      <p>브라우저는 이 저장소의 ./data/*.csv 파일만 읽습니다. 데이터는 GitHub Actions가 평일마다 갱신합니다.</p>
+    </footer>
+  </main>
+</body>
+</html>

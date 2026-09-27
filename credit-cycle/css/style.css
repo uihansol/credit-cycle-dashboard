@@ -130,6 +130,8 @@ input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 40px
 .chart-panel__head h2 { margin: 0; font-size: 1.02rem; font-weight: 650; letter-spacing: -0.01em; }
 .chart-panel__sub { margin: 2px 0 0; font-size: 0.82rem; color: var(--muted); }
 .chart-panel__note { margin: 4px 2px 4px; font-size: 0.78rem; color: var(--muted); }
+.legend-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin: 0 3px -1px 1px; }
+.legend-dot--current { background: #c0392b; }
 .chart-panel--hero { padding: 20px 20px 12px; }
 .chart-panel--hero .chart-panel__head h2 { font-size: 1.2rem; }
 

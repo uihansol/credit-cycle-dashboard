@@ -21,6 +21,36 @@ const TIME_SCALE = [
   [1, '#12375c'],
 ];
 
+const CURRENT_COLOR = '#c0392b';
+const REF_LINE_COLOR = '#9aa5b1';
+
+/**
+ * 궤적 위에 표시할 "연도 라벨" 지점을 고른다.
+ * 각 연도의 첫 관측치를 후보로 삼고, 라벨이 8~14개 정도가 되도록 걸러낸다.
+ * @param {{date:string}[]} points
+ * @returns {{index:number, year:string}[]}
+ */
+function pickYearMarks(points) {
+  const firstOfYear = new Map(); // year → index
+  points.forEach((p, i) => {
+    const y = p.date.slice(0, 4);
+    if (!firstOfYear.has(y)) firstOfYear.set(y, i);
+  });
+  const years = [...firstOfYear.keys()];
+  const targetCount = 12;
+  const step = Math.max(1, Math.ceil(years.length / targetCount));
+  const marks = [];
+  years.forEach((y, i) => {
+    if (i % step === 0) marks.push({ index: firstOfYear.get(y), year: y });
+  });
+  // 마지막 연도가 걸러졌다면 다시 넣어 최신 시점까지 라벨이 이어지게 한다.
+  const lastYear = years[years.length - 1];
+  if (marks.length && marks[marks.length - 1].year !== lastYear) {
+    marks.push({ index: firstOfYear.get(lastYear), year: lastYear });
+  }
+  return marks;
+}
+
 const BASE_CONFIG = {
   responsive: true,
   displaylogo: false,
@@ -88,6 +118,16 @@ export function renderTrajectory(el, points, opts, overlays = {}) {
     line: { color: COLORS.path, width: 1 },
     hoverinfo: 'skip',
   };
+
+  const yearMarks = pickYearMarks(points);
+  // 연도 라벨 지점: 점을 살짝 키우고 진한 테두리를 둘러 궤적 점들과 구분한다.
+  const yearDots = {
+    type: 'scatter', mode: 'markers', x: yearMarks.map((m) => xs[m.index]), y: yearMarks.map((m) => ys[m.index]),
+    marker: { size: Math.max(opts.markerSize + 3, 9), color: 'rgba(0,0,0,0)', line: { width: 1.6, color: COLORS.ink } },
+    hoverinfo: 'skip',
+    showlegend: false,
+  };
+
   const dots = {
     type, mode: 'markers', x: xs, y: ys,
     customdata: labels,
@@ -100,9 +140,9 @@ export function renderTrajectory(el, points, opts, overlays = {}) {
       line: { width: 0.5, color: 'rgba(255,255,255,0.8)' },
       opacity: 0.9,
       colorbar: mobile || n < 2 ? undefined : {
-        thickness: 8, len: 0.6, outlinewidth: 0,
-        tickvals: [0, n - 1],
-        ticktext: [labels[0], labels[n - 1]],
+        thickness: 10, len: 0.75, outlinewidth: 0,
+        tickvals: yearMarks.map((m) => m.index),
+        ticktext: yearMarks.map((m) => `${m.year}년`),
         tickfont: { size: 10, color: COLORS.muted },
       },
       showscale: !mobile && n >= 2,
@@ -112,20 +152,46 @@ export function renderTrajectory(el, points, opts, overlays = {}) {
       `<br>Y (${opts.yShort}): %{y:.${opts.yDigits}f}<extra></extra>`,
   };
 
+  // 가장 최근 시점: 큰 점으로 강조해 "지금 위치"를 바로 찾을 수 있게 한다.
+  const current = {
+    type: 'scatter', mode: 'markers', x: [xs[n - 1]], y: [ys[n - 1]],
+    customdata: [labels[n - 1]],
+    marker: { size: Math.max(opts.markerSize + 7, 14), color: CURRENT_COLOR, line: { width: 2, color: '#ffffff' }, symbol: 'circle' },
+    hovertemplate: `현재 (%{customdata})<br>X: %{x:.${opts.xDigits}f}<br>Y: %{y:.${opts.yDigits}f}<extra></extra>`,
+  };
+
   const layout = baseLayout(mobile);
   layout.margin = { ...layout.margin, r: mobile ? 16 : 24, b: 52, l: mobile ? 48 : 64 };
   layout.xaxis = { ...layout.xaxis, title: { text: opts.xLabel, font: { size: 12, color: COLORS.muted } } };
   layout.yaxis = { ...layout.yaxis, title: { text: opts.yLabel, font: { size: 12, color: COLORS.muted } } };
   layout.hovermode = 'closest';
-  layout.shapes = overlays.shapes || [];
-  layout.annotations = overlays.annotations || [];
 
-  return Plotly.react(el, [path, dots, ...(overlays.traces || [])], layout, config());
+  // 장단기금리차 역전 기준선 (Y = 10Y/2Y = 1, 즉 10Y=2Y). Y축이 항상 이 값을 포함하지 않을 수 있어 존재할 때만 그린다.
+  const yVals = ys;
+  const yMin = Math.min(...yVals), yMax = Math.max(...yVals);
+  const refLine = yMin < 1 && yMax > 0.9
+    ? [{
+      type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'y', y0: 1, y1: 1,
+      line: { color: REF_LINE_COLOR, width: 1, dash: 'dash' },
+    }]
+    : [];
+  const refAnnotation = refLine.length
+    ? [{
+      xref: 'paper', x: 1, xanchor: 'right', yref: 'y', y: 1, yanchor: 'bottom',
+      text: '10Y = 2Y (장단기 역전선)', showarrow: false,
+      font: { size: 10, color: REF_LINE_COLOR }, bgcolor: 'rgba(255,255,255,0.7)',
+    }]
+    : [];
+
+  layout.shapes = [...refLine, ...(overlays.shapes || [])];
+  layout.annotations = [...refAnnotation, ...(overlays.annotations || [])];
+
+  return Plotly.react(el, [path, yearDots, dots, current, ...(overlays.traces || [])], layout, config());
 }
 
-/** 궤적 점 크기만 바꾼다 (전체 재렌더링 없이) */
+/** 궤적 점 크기만 바꾼다 (전체 재렌더링 없이). trace 순서: 0 선, 1 연도표식, 2 궤적점, 3 현재점 */
 export function setTrajectoryMarkerSize(el, size) {
-  if (el && el.data) Plotly.restyle(el, { 'marker.size': size }, [1]);
+  if (el && el.data) Plotly.restyle(el, { 'marker.size': size }, [2]);
 }
 
 export function clearChart(el) {

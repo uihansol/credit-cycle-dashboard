@@ -52,6 +52,19 @@
 
     <div id="notice" class="notice" role="alert" hidden></div>
 
+    <article class="panel chart-panel chart-panel--hero">
+      <header class="chart-panel__head">
+        <h2>금리·신용 사이클 궤적</h2>
+        <p id="trajectory-sub" class="chart-panel__sub"></p>
+      </header>
+      <div id="chart-trajectory" class="chart chart--large"></div>
+      <p class="chart-panel__note">
+        점 색이 진할수록 최근 시점입니다 (오른쪽 색상 막대에 연도 표시).
+        굵은 테두리만 있는 점은 각 연도의 시작 지점, <span class="legend-dot legend-dot--current"></span>빨간 점은 가장 최근 값입니다.
+        점선은 장단기금리차 역전 기준선(10Y=2Y)입니다. 드래그로 확대, 더블클릭으로 원래 크기로 돌아갑니다.
+      </p>
+    </article>
+
     <section class="grid-2">
       <article class="panel chart-panel">
         <header class="chart-panel__head">
@@ -68,15 +81,6 @@
         <div id="chart-y" class="chart chart--small"></div>
       </article>
     </section>
-
-    <article class="panel chart-panel chart-panel--hero">
-      <header class="chart-panel__head">
-        <h2>금리·신용 사이클 궤적</h2>
-        <p id="trajectory-sub" class="chart-panel__sub"></p>
-      </header>
-      <div id="chart-trajectory" class="chart chart--large"></div>
-      <p class="chart-panel__note">점 색이 진할수록 최근 시점입니다. 드래그로 확대, 더블클릭으로 원래 크기로 돌아갑니다.</p>
-    </article>
 
     <section id="cards" class="stats" aria-label="현재 지표"></section>
 

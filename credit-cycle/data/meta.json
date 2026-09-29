@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-09-29T08:30:10Z",
+  "updated_at": "2026-09-29T13:34:10Z",
   "source": "fredgraph.csv",
   "series": {
     "BAA": {
@@ -57,6 +57,18 @@
       "last": "2026-09-25"
     },
     "HYM": {
+      "rows": 36,
+      "valid": 36,
+      "first": "2023-10-01",
+      "last": "2026-09-01"
+    },
+    "BBB": {
+      "rows": 793,
+      "valid": 785,
+      "first": "2023-09-29",
+      "last": "2026-09-25"
+    },
+    "BBBM": {
       "rows": 36,
       "valid": 36,
       "first": "2023-10-01",

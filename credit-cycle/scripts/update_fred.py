@@ -37,6 +37,11 @@ MONTHLY_START = "1976-06-01"   # GS2 시작 시점
 DAILY_START = "1986-01-02"     # DBAA/DAAA 시작 시점
 HY_START = "1996-12-31"        # BAMLH0A0HYM2(하이일드 OAS) 시작 시점
 BBB_START = "1996-12-31"       # BAMLC0A4CBBB(BBB 회사채 OAS) 시작 시점
+VIX_START = "1990-01-02"       # VIXCLS(CBOE 변동성 지수) 시작 시점
+
+# ICE BofA 시리즈는 2026-04부터 FRED 최신판에서 최근 3년치만 공개된다. 그 전에 공개됐던
+# 과거 판(ALFRED vintage)에 남아 있는 이력으로 한 번 채워 보는 날짜들 (앞에서부터 시도).
+BACKFILL_VINTAGES = ["2026-03-31", "2026-03-02", "2026-01-02", "2025-12-31"]
 RECESSION_START = "1976-01-01"  # USREC — 우리 대시보드의 공통 시작보다 넉넉히 이르게
 
 # key(파일명) → { fred_id, start, fq?, fam? }
@@ -62,8 +67,12 @@ SERIES: dict[str, dict] = {
     # BBB 등급 회사채 스프레드 (ICE BofA BBB US Corporate Index OAS). 투자등급 중 가장 낮은 등급으로
     # 하이일드 바로 위에 있어 신용 경계 신호가 빠르다. HY와 같은 ICE BofA 시리즈라 FRED 공개 기간
     # 제한(최근 3년)이 똑같이 적용될 수 있다 — 짧으면 대시보드가 V2(Baa−10Y) 이력으로 보완한다.
-    "BBB": {"fred_id": "BAMLC0A4CBBB", "start": BBB_START},
-    "BBBM": {"fred_id": "BAMLC0A4CBBB", "start": BBB_START, "fq": "Monthly", "fam": "avg"},
+    # backfill=True: 기존 파일이 시작일보다 1년 이상 늦게 시작하면 ALFRED 과거 판으로 앞부분을 채워 본다.
+    "BBB": {"fred_id": "BAMLC0A4CBBB", "start": BBB_START, "backfill": True},
+    "BBBM": {"fred_id": "BAMLC0A4CBBB", "start": BBB_START, "fq": "Monthly", "fam": "avg", "backfill": True},
+    # CBOE 변동성 지수(VIX) — 사이클 맵에서 원 크기로 쓴다. 일간 + 월평균
+    "VIX": {"fred_id": "VIXCLS", "start": VIX_START},
+    "VIXM": {"fred_id": "VIXCLS", "start": VIX_START, "fq": "Monthly", "fam": "avg"},
     # NBER 경기침체 판정 (0/1, 월간) — 침체 음영 표시용
     "USREC": {"fred_id": "USREC", "start": RECESSION_START},
 }
@@ -135,6 +144,51 @@ def fetch_api(meta: dict, start: str) -> dict[str, str]:
 
 def fetch(meta: dict, start: str) -> dict[str, str]:
     return fetch_api(meta, start) if API_KEY else fetch_fredgraph(meta, start)
+
+
+def fetch_vintage(meta: dict, start: str, vintage: str) -> dict[str, str]:
+    """과거 판(vintage) 기준 관측치. API 키가 있으면 공식 API(realtime), 없으면 ALFRED CSV."""
+    if API_KEY:
+        params = {
+            "series_id": meta["fred_id"], "api_key": API_KEY, "file_type": "json",
+            "observation_start": start, "realtime_start": vintage, "realtime_end": vintage,
+        }
+        if meta.get("fq") == "Monthly":
+            params["frequency"] = "m"
+            params["aggregation_method"] = meta.get("fam", "avg")
+        payload = json.loads(http_get("https://api.stlouisfed.org/fred/series/observations?"
+                                      + urllib.parse.urlencode(params), retries=2))
+        return {o["date"]: normalize(o["value"]) for o in payload.get("observations", [])}
+    params = {"id": meta["fred_id"], "vintage_date": vintage, "cosd": start}
+    if meta.get("fq"):
+        params["fq"] = meta["fq"]
+    if meta.get("fam"):
+        params["fam"] = meta["fam"]
+    q = urllib.parse.urlencode(params)
+    return parse_fred_csv(http_get(f"https://alfred.stlouisfed.org/graph/alfredgraph.csv?{q}", retries=2), meta["fred_id"])
+
+
+def backfill_history(series_id: str, meta: dict, existing: dict[str, str], fetcher=None) -> dict[str, str]:
+    """기존 파일의 첫 날짜 이전 구간을 과거 판에서 가져온다. 겹치는 날짜는 건드리지 않는다(최신값 우선)."""
+    fetcher = fetcher or fetch_vintage
+    valid = sorted(d for d, v in existing.items() if v)
+    first = valid[0] if valid else None
+    start = meta["start"]
+    if first and (date.fromisoformat(first) - date.fromisoformat(start)).days < 366:
+        return {}
+    for vintage in BACKFILL_VINTAGES:
+        try:
+            got = fetcher(meta, start, vintage)
+        except Exception as e:  # noqa: BLE001 — 과거 판 조회 실패는 치명적이지 않다
+            print(f"    과거 판 {vintage} 조회 실패: {e}", flush=True)
+            continue
+        older = {d: v for d, v in got.items() if v and (first is None or d < first) and d >= start}
+        if older:
+            ds = sorted(older)
+            print(f"    과거 판 {vintage}에서 {len(older)}개 보충 ({ds[0]} ~ {ds[-1]})", flush=True)
+            return older
+        print(f"    과거 판 {vintage}: 더 이른 관측치 없음", flush=True)
+    return {}
 
 
 def normalize(value: str) -> str:
@@ -212,6 +266,10 @@ def update_series(series_id: str, meta: dict, fetcher=None, today: date | None =
             raise RuntimeError(f"{series_id}: 전체 다운로드 결과가 비어 있습니다.")
 
     merged = merge(existing, fresh, start)
+    if meta.get("backfill"):
+        older = backfill_history(series_id, meta, merged)
+        if older:
+            merged = merge(older, merged, start)  # 겹치면 최신 판 값 우선
     write_csv(path, series_id, merged)
     info = summarize(merged)
     print(f"    저장: 유효값 {info['valid']}개, {info['first']} ~ {info['last']}", flush=True)

@@ -2,20 +2,20 @@
 // app.js — 상태 관리 + UI 연결 (진입점)
 // ============================================================
 import {
-  FREQUENCIES, VERSIONS, Y_AXES, REQUIRED_KEYS, OPTIONAL_KEYS, RECESSION_FILE, FORECAST,
+  FREQUENCIES, VERSIONS, Y_AXES, REQUIRED_KEYS, OPTIONAL_KEYS, RECESSION_FILE, FORECAST, MAP_DEFAULTS,
   DEFAULT_FREQ, DEFAULT_VERSION, DEFAULT_MARKER_SIZE, DEFAULT_Y_AXIS,
 } from './config.js';
 import { loadSeries, loadMeta, DataLoadError, skippedSeries } from './data-loader.js';
 import {
   alignSeries, aggregateAnnualMean, aggregateWeeklyMean, filterByDate, computePoints,
-  formatDateLabel, computeRecessionPeriods, computeSpeeds, toAxisDate, addSteps, median,
+  formatDateLabel, computeRecessionPeriods, computeSpeeds, toAxisDate, addSteps, median, spliceWithOffset,
 } from './transform.js';
 import {
   PHASES, PHASE_ORDER, stepsFor, spliceProxyHistory, findAnalogs, projectFromAnalogs,
   summarizeProjection, diagnose, recessionWithin,
 } from './forecast.js';
 import {
-  renderTimeSeries, renderTrajectory, setTrajectoryMarkerSize, clearChart, COLORS,
+  renderTimeSeries, renderTrajectory, renderCycleMap, setTrajectoryMarkerSize, clearChart, COLORS,
 } from './charts.js';
 import { buildOverlays } from './overlays.js';
 
@@ -33,8 +33,11 @@ const state = {
   horizon: FORECAST.defaultHorizon, // 전망 기간(개월)
   highlightAnalog: null,   // 강조할 유사 시점 날짜
   zoomCurrent: false,      // 궤적을 최근 3년 + 전망 경로 범위로 확대
+  tab: 'trajectory',       // 'trajectory' | 'map' | 'series' — 보이는 탭만 그린다
+  map: { ...MAP_DEFAULTS }, // 사이클 맵 탭 옵션 (세로축·로그·원 크기 등)
   rows: {},                // freq → 정렬된 원자료 행
   latest: {},              // freq → 마지막 관측 날짜 (YYYY-MM-DD)
+  splices: {},             // freq → 버전 → 이어 붙인 정보 {offset, overlap, realStart}
   recessionPeriods: null,  // USREC에서 뽑은 [{start,end}] (빈도와 무관, 한 번만 로드)
   features: { recession: true, phases: true, events: false, arrows: false, recent: true, forecast: true },
 };
@@ -58,7 +61,12 @@ const el = {
   optRecession: $('opt-recession'), optPhases: $('opt-phases'), optEvents: $('opt-events'),
   optArrows: $('opt-arrows'), optRecent: $('opt-recent'), optForecast: $('opt-forecast'),
   colorMode: $('color-mode'),
+  tabs: document.querySelectorAll('[role="tab"][data-tab]'),
+  chartMap: $('chart-map'), chartVix: $('chart-vix'), mapSub: $('map-sub'), mapVixNow: $('map-vix-now'),
+  mapYSeg: $('map-y-seg'), mapSizeSeg: $('map-size-seg'), mapHint: $('map-hint'),
+  mapLogX: $('map-logx'), mapLogY: $('map-logy'), mapLine: $('map-line'), mapLabels: $('map-labels'), mapCycle: $('map-cycle'),
 };
+const ALL_CHARTS = () => [el.chartX, el.chartY, el.chartTraj, el.chartMap, el.chartVix];
 
 // ------------------------------------------------------------ 알림
 function showNotice(kind, html, tag = '') {
@@ -99,7 +107,15 @@ async function ensureRows(freq, { refresh = false } = {}) {
   const maps = await loadSeries(cfg.files, { refresh, optional: OPTIONAL_KEYS });
   let rows = alignSeries(maps, REQUIRED_KEYS).filter((r) => r.date >= cfg.minDate);
   state.latest[freq] = rows.length ? rows[rows.length - 1].date : '';
+  // 공개 기간이 짧은 지표는 같은 등급대의 장기 지표로 앞쪽을 이어 붙인다 (예: V7 BBB ← Moody's Baa).
+  // 집계(주·연) 전 원자료에서 이어 붙여야 연간처럼 행이 적은 빈도에서도 겹치는 구간이 충분하다.
+  state.splices[freq] = {};
   const keys = Object.keys(cfg.files);
+  for (const [vk, v] of Object.entries(VERSIONS)) {
+    if (!v.splice) continue;
+    state.splices[freq][vk] = spliceWithOffset(rows, v.splice.key, v.splice.proxy, v.splice.out);
+    keys.push(v.splice.out);
+  }
   if (cfg.aggregate === 'annualMean') rows = aggregateAnnualMean(rows, keys);
   if (cfg.aggregate === 'weeklyMean') rows = aggregateWeeklyMean(rows, keys);
   state.rows[freq] = rows;
@@ -263,6 +279,10 @@ function render() {
   const hist = state.rows[state.freq] ? analysisHistory() : null;
   const notes = [];
   if (v.note) notes.push(v.note);
+  const sp = state.splices[state.freq]?.[state.version];
+  if (sp?.offset !== null && sp?.offset !== undefined && sp.realStart) {
+    notes.push(`${formatDateLabel(sp.realStart, state.freq)} 이전은 ${v.splice.proxyLabel} − ${sp.offset.toFixed(2)}%p로 환산한 값입니다 (겹치는 ${sp.overlap}개 관측치의 중앙값 차이).`);
+  }
   if (hist?.fit) {
     notes.push(`전망·백분위 계산에는 ${formatDateLabel(hist.ownStart, state.freq)} 이전 구간을 ${VERSIONS[v.proxy].xShort} 장기 이력으로 환산해 씁니다 (겹치는 ${hist.fit.n}개 관측치 회귀, R² ${hist.fit.r2.toFixed(2)}${hist.fit.r2 < 0.5 ? ' — 겹치는 기간의 관계가 약해 전망은 방향 참고용으로만 보세요' : ''}).`);
   }
@@ -270,7 +290,7 @@ function render() {
   el.versionNote.hidden = !notes.length;
 
   if (!points.length) {
-    [el.chartX, el.chartY, el.chartTraj].forEach(clearChart);
+    ALL_CHARTS().forEach(clearChart);
     el.diagnosis.innerHTML = '';
     el.forecastBody.innerHTML = '<p class="empty">표시할 관측치가 없습니다.</p>';
     if (v.needs && skippedSeries.has(v.needs)) {
@@ -302,16 +322,26 @@ function render() {
     q75: fc.proj.bands.q75[axis], q90: fc.proj.bands.q90[axis],
   } : null);
 
-  renderTimeSeries(el.chartX, points, {
-    accessor: (p) => p.x, label: v.xShort, digits: v.digits, freq: state.freq, color: COLORS.xSeries,
-    recessions: visibleRecessions, forecast: fan('x'),
-  });
-  renderTimeSeries(el.chartY, points, {
-    accessor: (p) => p.y, label: y.short, digits: y.digits, freq: state.freq, color: COLORS.ySeries,
-    recessions: visibleRecessions, forecast: fan('y'), refLine: y.inversion,
-  });
-
-  drawTrajectory(points, { hist, fc });
+  // 보이는 탭의 그래프만 그린다 (숨긴 패널의 Plotly는 크기를 못 잡는다 → 탭 전환 시 다시 render)
+  if (state.tab === 'series') {
+    renderTimeSeries(el.chartX, points, {
+      accessor: (p) => p.x, label: v.xShort, digits: v.digits, freq: state.freq, color: COLORS.xSeries,
+      recessions: visibleRecessions, forecast: fan('x'),
+    });
+    renderTimeSeries(el.chartY, points, {
+      accessor: (p) => p.y, label: y.short, digits: y.digits, freq: state.freq, color: COLORS.ySeries,
+      recessions: visibleRecessions, forecast: fan('y'), refLine: y.inversion,
+    });
+    const vixPts = points.filter((p) => Number.isFinite(p.raw?.VIX));
+    if (vixPts.length) {
+      renderTimeSeries(el.chartVix, points, {
+        accessor: (p) => (Number.isFinite(p.raw?.VIX) ? p.raw.VIX : null), label: 'VIX', digits: 1,
+        freq: state.freq, color: '#6a3fb5', recessions: visibleRecessions,
+      });
+    } else clearChart(el.chartVix);
+  }
+  if (state.tab === 'trajectory') drawTrajectory(points, { hist, fc });
+  if (state.tab === 'map') drawCycleMap(hist);
   renderDiagnosis(diag, hist, fc);
   renderForecastPanel(fc, hist, diag);
   writeHash();
@@ -356,6 +386,65 @@ function zoomRange(points, proj, fcfg) {
     return [lo - p, hi + p];
   };
   return { x: pad(all.map((p) => p.x)), y: pad(all.map((p) => p.y)) };
+}
+
+// ------------------------------------------------------------ 사이클 맵
+function drawCycleMap(hist) {
+  const v = VERSIONS[state.version];
+  const m = state.map;
+  const y = Y_AXES[m.yAxis];
+  const fcfg = FREQUENCIES[state.freq];
+  const rows = filterByDate(state.rows[state.freq] || [], state.start, state.end);
+  const points = computePoints(rows, v, y);
+  el.mapSub.textContent = `가로 ${v.xShort} × 세로 ${y.short} · ${fcfg.label}간 자료 · 색 = 연도, 크기 = ${m.sizeMode === 'vix' ? 'VIX' : '고정'}`;
+  if (!points.length) { clearChart(el.chartMap); return; }
+
+  // 로그 스케일은 양수에서만 가능 — 음수가 섞이면 끄고 이유를 알려 준다
+  const hints = [];
+  const logX = m.logX && points.every((p) => p.x > 0);
+  const logY = m.logY && points.every((p) => p.y > 0);
+  if (m.logX && !logX) hints.push(`${v.xShort}에 0 이하 값이 있어 가로축 로그 스케일을 적용할 수 없습니다.`);
+  if (m.logY && !logY) hints.push(`${y.menu}는 역전 시 음수가 되어 세로축 로그 스케일을 적용할 수 없습니다 — 로그로 보려면 세로축을 10Y/2Y 비율로 바꾸세요.`);
+  const hasVix = points.some((p) => Number.isFinite(p.raw?.VIX));
+  if (m.sizeMode === 'vix' && !hasVix) {
+    hints.push(skippedSeries.has('VIX')
+      ? 'VIX 데이터가 아직 저장소에 없어 원 크기를 고정으로 표시합니다 (GitHub Actions 업데이트 후 반영).'
+      : '선택한 기간에는 VIX 값이 없어 원 크기를 고정으로 표시합니다.');
+  }
+  el.mapHint.textContent = hints.join(' ');
+  el.mapHint.hidden = !hints.length;
+
+  // 최신 VIX: 마지막 점에 없으면(휴장·발표 지연) 가까운 이전 값을 날짜와 함께 보여 준다
+  let vixPt = null;
+  for (let i = points.length - 1; i >= Math.max(0, points.length - 15); i--) {
+    if (Number.isFinite(points[i].raw?.VIX)) { vixPt = points[i]; break; }
+  }
+  el.mapVixNow.hidden = !vixPt;
+  if (vixPt) {
+    const same = vixPt === points[points.length - 1];
+    el.mapVixNow.textContent = `현재 VIX ${vixPt.raw.VIX.toFixed(1)}${same ? '' : ` (${formatDateLabel(vixPt.date, state.freq)})`}`;
+  }
+
+  renderCycleMap(el.chartMap, points, {
+    freq: state.freq, xLabel: v.xLabel, yLabel: y.label, xShort: v.xShort, yShort: y.short,
+    xDigits: v.digits, yDigits: y.digits, logX, logY,
+    sizeMode: m.sizeMode === 'vix' && hasVix ? 'vix' : 'fixed', markerSize: state.markerSize + 2,
+    showLine: m.line, showLabels: m.labels, showCycle: m.cycle,
+    xSplit: hist?.xSplit, yInversion: y.inversion,
+  });
+}
+
+// ------------------------------------------------------------ 탭
+function setTab(tab, { focus = false } = {}) {
+  if (!['trajectory', 'map', 'series'].includes(tab)) tab = 'trajectory';
+  state.tab = tab;
+  el.tabs.forEach((b) => {
+    const on = b.dataset.tab === tab;
+    b.setAttribute('aria-selected', String(on));
+    b.tabIndex = on ? 0 : -1;
+    document.getElementById(b.getAttribute('aria-controls')).hidden = !on;
+    if (on && focus) b.focus();
+  });
 }
 
 // ------------------------------------------------------------ 진단 카드
@@ -564,6 +653,8 @@ function writeHash() {
   p.set('v', state.version); p.set('y', state.yAxis); p.set('f', state.freq); p.set('h', String(state.horizon));
   if (state.start !== FREQUENCIES[state.freq].minDate) p.set('s', state.start);
   if (!state.endAuto && state.end) p.set('e', state.end);
+  if (state.tab !== 'trajectory') p.set('t', state.tab);
+  if (state.map.yAxis !== MAP_DEFAULTS.yAxis) p.set('my', state.map.yAxis);
   const next = `#${p.toString()}`;
   if (location.hash !== next) history.replaceState(null, '', next);
 }
@@ -573,6 +664,8 @@ function readHash() {
   if (VERSIONS[p.get('v')]) state.version = p.get('v');
   if (Y_AXES[p.get('y')]) state.yAxis = p.get('y');
   if (FREQUENCIES[p.get('f')]) state.freq = p.get('f');
+  if (p.get('t')) state.tab = p.get('t');
+  if (Y_AXES[p.get('my')]) state.map.yAxis = p.get('my');
   const h = Number(p.get('h'));
   if (horizonsFor(state.freq).includes(h)) state.horizon = h;
   const re = /^\d{4}-\d{2}-\d{2}$/;
@@ -594,7 +687,7 @@ async function loadAndRender({ refresh = false } = {}) {
   } catch (err) {
     console.error(err);
     showLoadError(err);
-    [el.chartX, el.chartY, el.chartTraj].forEach(clearChart);
+    ALL_CHARTS().forEach(clearChart);
     el.diagnosis.innerHTML = '';
     el.forecastBody.innerHTML = '';
     setStatus('');
@@ -699,7 +792,8 @@ function bindControls() {
   el.size.addEventListener('input', () => {
     state.markerSize = Number(el.size.value);
     el.sizeOut.textContent = state.markerSize;
-    setTrajectoryMarkerSize(el.chartTraj, state.markerSize);
+    if (state.tab === 'trajectory') setTrajectoryMarkerSize(el.chartTraj, state.markerSize);
+    else if (state.tab === 'map' && state.map.sizeMode === 'fixed' && state.rows[state.freq]) render();
   });
   el.reload.addEventListener('click', () => loadAndRender({ refresh: true }));
   el.play.addEventListener('click', () => (playTimer ? stopPlay() : startPlay()));
@@ -724,6 +818,44 @@ function bindControls() {
   toggle(el.optRecent, 'recent');
   toggle(el.optForecast, 'forecast');
   el.colorMode.addEventListener('change', () => { state.colorMode = el.colorMode.value; if (state.rows[state.freq]) render(); });
+
+  // 탭: 클릭 + 좌우 화살표 키
+  setTab(state.tab);
+  el.tabs.forEach((b) => b.addEventListener('click', () => {
+    setTab(b.dataset.tab);
+    if (state.rows[state.freq]) render();
+  }));
+  el.tabs[0].parentElement.addEventListener('keydown', (ev) => {
+    if (!['ArrowLeft', 'ArrowRight'].includes(ev.key)) return;
+    const list = [...el.tabs];
+    const i = list.findIndex((b) => b.dataset.tab === state.tab);
+    const next = list[(i + (ev.key === 'ArrowRight' ? 1 : list.length - 1)) % list.length];
+    setTab(next.dataset.tab, { focus: true });
+    if (state.rows[state.freq]) render();
+    ev.preventDefault();
+  });
+
+  // 사이클 맵 옵션
+  buildSeg(el.mapYSeg, Object.entries(Y_AXES).map(([k, yy]) => [k, yy.menu]), state.map.yAxis, (val) => {
+    state.map.yAxis = val;
+    if (state.rows[state.freq]) render();
+  });
+  buildSeg(el.mapSizeSeg, [['vix', 'VIX'], ['fixed', '고정']], state.map.sizeMode, (val) => {
+    state.map.sizeMode = val;
+    if (state.rows[state.freq]) render();
+  });
+  const mapToggle = (input, key) => {
+    input.checked = state.map[key];
+    input.addEventListener('change', () => {
+      state.map[key] = input.checked;
+      if (state.rows[state.freq]) render();
+    });
+  };
+  mapToggle(el.mapLogX, 'logX');
+  mapToggle(el.mapLogY, 'logY');
+  mapToggle(el.mapLine, 'line');
+  mapToggle(el.mapLabels, 'labels');
+  mapToggle(el.mapCycle, 'cycle');
 
   el.forecastBody.addEventListener('click', (ev) => {
     const b = ev.target.closest('button.analog');

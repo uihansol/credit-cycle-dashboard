@@ -8,6 +8,7 @@ import { dirname, join } from 'node:path';
 import {
   alignSeries, aggregateAnnualMean, aggregateWeeklyMean, weekEnding, addSteps, filterByDate,
   computePoints, formatDateLabel, computeRecessionPeriods, computeSpeeds, median, percentileRank, pointAt,
+  spliceWithOffset,
 } from '../js/transform.js';
 import {
   classifyPhase, stepsFor, spliceProxyHistory, findAnalogs, projectFromAnalogs, summarizeProjection,
@@ -259,8 +260,12 @@ function loadMaps(files) {
 test('실데이터: 모든 빈도·버전·세로축에서 전망이 계산된다', () => {
   for (const [fk, cfg] of Object.entries(FREQUENCIES)) {
     let rows = alignSeries(loadMaps(cfg.files), REQUIRED_KEYS).filter((r) => r.date >= cfg.minDate);
-    if (cfg.aggregate === 'annualMean') rows = aggregateAnnualMean(rows);
-    if (cfg.aggregate === 'weeklyMean') rows = aggregateWeeklyMean(rows);
+    const keys = Object.keys(cfg.files);
+    for (const v of Object.values(VERSIONS)) {
+      if (v.splice) { spliceWithOffset(rows, v.splice.key, v.splice.proxy, v.splice.out); keys.push(v.splice.out); }
+    }
+    if (cfg.aggregate === 'weeklyMean') rows = aggregateWeeklyMean(rows, keys);
+    if (cfg.aggregate === 'annualMean') rows = aggregateAnnualMean(rows, keys);
     assert.ok(rows.length > 40, `${fk} 행 수`);
     for (const [vk, v] of Object.entries(VERSIONS)) {
       for (const [yk, y] of Object.entries(Y_AXES)) {
@@ -293,17 +298,37 @@ test('실데이터: 주간 빈도는 일간과 같은 최신일로 끝난다', (
   assert.ok(weekly.length > daily.length / 6 && weekly.length < daily.length / 4);
 });
 
-test('V7(BBB): 값이 없으면 null, 있으면 X로 쓰고, 선택 시리즈가 빠져도 다른 버전은 그대로', () => {
-  assert.equal(VERSIONS.V7.compute({ BBB: null }), null);
-  assert.equal(VERSIONS.V7.compute({}), null);
-  assert.equal(VERSIONS.V7.compute({ BBB: 1.7 }), 1.7);
+test('spliceWithOffset: 겹치는 구간 중앙값 차이로 앞쪽을 이어 붙인다', () => {
+  const rows = [];
+  for (let i = 0; i < 30; i++) {
+    rows.push({ date: `20${String(10 + Math.floor(i / 12)).padStart(2, '0')}-${String((i % 12) + 1).padStart(2, '0')}-01`,
+      BAA: 6 + 0.1 * i, GS10: 4, BBB: i >= 15 ? (2 + 0.1 * i) - 0.7 : null });
+  }
+  const res = spliceWithOffset(rows, 'BBB', (r) => r.BAA - r.GS10, 'BBBL');
+  assert.ok(Math.abs(res.offset - 0.7) < 1e-9);
+  assert.equal(res.overlap, 15);
+  assert.equal(res.realStart, rows[15].date);
+  assert.ok(rows[0].BBBL_proxied && !rows[20].BBBL_proxied);
+  assert.ok(Math.abs(rows[0].BBBL - (2 - 0.7)) < 1e-9);
+  assert.equal(rows[20].BBBL, rows[20].BBB);
+  // 겹침이 부족하면 환산하지 않음
+  const few = rows.map((r, i) => ({ ...r, BBB: i >= 25 ? 1 : null }));
+  const r2 = spliceWithOffset(few, 'BBB', (r) => r.BAA - r.GS10, 'BBBL');
+  assert.equal(r2.offset, null);
+  assert.equal(few[0].BBBL, null);
+  assert.equal(few[26].BBBL, 1);
+});
+
+test('V7(BBB): 이어 붙인 BBBL을 X로 쓰고, BBB 파일이 없으면 V7만 비고 다른 버전은 그대로', () => {
+  assert.equal(VERSIONS.V7.compute({ BBBL: null }), null);
+  assert.equal(VERSIONS.V7.compute({ BBBL: 1.7 }), 1.7);
   assert.ok(OPTIONAL_KEYS.includes(VERSIONS.V7.needs));
   const maps = {
     GS10: new Map([['2000-01-01', 6]]), GS2: new Map([['2000-01-01', 5]]),
     BAA: new Map([['2000-01-01', 8]]), BBB: new Map(),
   };
   const rows = alignSeries(maps, REQUIRED_KEYS);
-  assert.equal(rows.length, 1);
+  spliceWithOffset(rows, 'BBB', VERSIONS.V7.splice.proxy, 'BBBL');
   assert.equal(computePoints(rows, VERSIONS.V7, Y_AXES.ratio).length, 0);
   assert.equal(computePoints(rows, VERSIONS.V2, Y_AXES.ratio).length, 1);
 });
@@ -315,4 +340,16 @@ test('aggregateWeeklyMean / aggregateAnnualMean: BBB 키도 집계된다', () =>
   ];
   assert.equal(aggregateWeeklyMean(rows, ['GS10', 'GS2', 'BBB'])[0].BBB, 1.5);
   assert.equal(aggregateAnnualMean(rows, ['GS10', 'GS2', 'BBB'])[0].BBB, 1.5);
+});
+
+test('실데이터: V7(BBB)은 이어 붙여 10년 이상 이력을 갖는다', () => {
+  for (const fk of ['daily', 'monthly']) {
+    const cfg = FREQUENCIES[fk];
+    const rows = alignSeries(loadMaps(cfg.files), REQUIRED_KEYS).filter((r) => r.date >= cfg.minDate);
+    const sp = spliceWithOffset(rows, 'BBB', VERSIONS.V7.splice.proxy, 'BBBL');
+    const pts = computePoints(rows, VERSIONS.V7, Y_AXES.spread);
+    const years = (Date.parse(pts[pts.length - 1].date) - Date.parse(pts[0].date)) / 3.156e10;
+    assert.ok(sp.offset !== null, `${fk} offset`);
+    assert.ok(years > 30, `${fk}: ${years.toFixed(1)}년`);
+  }
 });

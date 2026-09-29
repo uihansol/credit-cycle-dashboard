@@ -16,7 +16,7 @@ export const REQUIRED_KEYS = ['GS10', 'GS2'];
  * 저장소에 파일이 아직 없어도 화면 전체가 오류로 멈추지 않게 하는 시리즈 키.
  * (Actions가 처음 받아오기 전이거나 FRED가 시리즈를 막았을 때 — 이 키를 쓰는 버전만 "데이터 없음"으로 안내한다.)
  */
-export const OPTIONAL_KEYS = ['BBB'];
+export const OPTIONAL_KEYS = ['BBB', 'VIX'];
 
 /**
  * 빈도별 원천 파일. key는 계산식에서 쓰는 공통 이름.
@@ -29,7 +29,7 @@ export const FREQUENCIES = {
     source: 'daily',
     minDate: '1986-01-02',
     stepsPerMonth: 21,          // 영업일 기준 한 달 ≈ 21개 관측치 (전망 기간 환산용)
-    files: { BAA: 'DBAA', AAA: 'DAAA', GS10: 'DGS10', GS2: 'DGS2', HY: 'HY', BBB: 'BBB' },
+    files: { BAA: 'DBAA', AAA: 'DAAA', GS10: 'DGS10', GS2: 'DGS2', HY: 'HY', BBB: 'BBB', VIX: 'VIX' },
   },
   weekly: {
     label: '주',
@@ -37,14 +37,14 @@ export const FREQUENCIES = {
     aggregate: 'weeklyMean',    // 주(월~일, 금요일 마감) 평균으로 집계
     minDate: '1986-01-02',
     stepsPerMonth: 52 / 12,
-    files: { BAA: 'DBAA', AAA: 'DAAA', GS10: 'DGS10', GS2: 'DGS2', HY: 'HY', BBB: 'BBB' },
+    files: { BAA: 'DBAA', AAA: 'DAAA', GS10: 'DGS10', GS2: 'DGS2', HY: 'HY', BBB: 'BBB', VIX: 'VIX' },
   },
   monthly: {
     label: '월',
     source: 'monthly',
     minDate: '1976-06-01',
     stepsPerMonth: 1,
-    files: { BAA: 'BAA', AAA: 'AAA', GS10: 'GS10', GS2: 'GS2', HY: 'HYM', BBB: 'BBBM' },
+    files: { BAA: 'BAA', AAA: 'AAA', GS10: 'GS10', GS2: 'GS2', HY: 'HYM', BBB: 'BBBM', VIX: 'VIXM' },
   },
   annual: {
     label: '연',
@@ -52,7 +52,7 @@ export const FREQUENCIES = {
     aggregate: 'annualMean',    // 연평균으로 집계
     minDate: '1976-06-01',
     stepsPerMonth: 1 / 12,
-    files: { BAA: 'BAA', AAA: 'AAA', GS10: 'GS10', GS2: 'GS2', HY: 'HYM', BBB: 'BBBM' },
+    files: { BAA: 'BAA', AAA: 'AAA', GS10: 'GS10', GS2: 'GS2', HY: 'HYM', BBB: 'BBBM', VIX: 'VIXM' },
   },
 };
 
@@ -104,6 +104,9 @@ export const Y_AXIS = Y_AXES.ratio;
  *  - separationMonths: 유사 시점끼리 최소 간격 (같은 에피소드가 여러 번 뽑히지 않게)
  *  - momentumWeight: 위치 대비 최근 흐름의 가중치
  */
+/** 사이클 맵 탭 기본값 — 참고 차트처럼 10Y/2Y 비율 + 양축 로그 + VIX 크기 */
+export const MAP_DEFAULTS = { yAxis: 'ratio', logX: true, logY: true, sizeMode: 'vix', line: false, labels: true, cycle: true };
+
 export const FORECAST = {
   horizons: [6, 12, 24],
   defaultHorizon: 12,
@@ -156,17 +159,17 @@ export const VERSIONS = {
     note: 'ICE BofA US High Yield 지수의 옵션조정스프레드(OAS)입니다. FRED가 2026년 4월부터 이 시리즈를 최근 3년치만 공개해서, 실제로 표시되는 기간은 그보다 짧을 수 있습니다.',
   },
   V7: {
-    label: 'V7 — BBB 회사채 OAS',
-    menu: 'BBB OAS',
-    xLabel: 'ICE BofA BBB 회사채 OAS (%)',
-    xShort: 'BBB OAS',
-    compute: (r) => (r.BBB === null || r.BBB === undefined ? null : r.BBB),
+    label: 'V7 — BBB 회사채 스프레드',
+    menu: 'BBB 스프레드',
+    xLabel: 'BBB 회사채 스프레드 (%, ICE BofA OAS + 이전은 Moody\'s Baa 환산)',
+    xShort: 'BBB',
+    // BBBL = ICE BofA BBB OAS(최근 3년) + 그 이전은 Moody's Baa−10Y를 겹치는 기간 평균 차이만큼 보정해 이은 값
+    compute: (r) => (r.BBBL === null || r.BBBL === undefined ? null : r.BBBL),
     digits: 2,
     unit: '%',
     deltaMode: 'mul',
-    minDate: '1996-12-31',
     needs: 'BBB',                // 이 키의 데이터가 저장소에 있어야 그려진다 (OPTIONAL_KEYS)
-    proxy: 'V2',                 // 자체 이력이 짧으면 Baa−10Y 장기 이력으로 전망 계산을 보완
-    note: 'ICE BofA BBB US Corporate Index의 옵션조정스프레드(OAS)입니다. BBB는 투자등급 중 가장 낮은 등급(하이일드 바로 위)이라 신용 경계 신호가 빠릅니다. 하이일드(V6)와 같은 ICE BofA 계열이라 FRED 공개 기간 제한(최근 3년)이 적용될 수 있고, 그 경우 표시 기간이 짧아집니다.',
+    splice: { key: 'BBB', out: 'BBBL', proxy: (r) => (r.BAA === null || r.BAA === undefined ? null : r.BAA - r.GS10), proxyLabel: "Moody's Baa−10Y" },
+    note: 'BBB는 투자등급 중 가장 낮은 등급(하이일드 바로 위)이라 신용 경계 신호가 빠릅니다. ICE BofA BBB OAS는 FRED가 최근 3년치만 공개하므로, 그 이전 구간은 같은 등급대인 Moody\'s Baa(= BBB 상당)의 10년물 대비 스프레드를 겹치는 기간의 평균 차이만큼 보정해 이어 붙였습니다.',
   },
 };

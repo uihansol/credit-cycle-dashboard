@@ -171,6 +171,35 @@ export function pointAt(points, date) {
 }
 
 /**
+ * 공개 기간이 짧은 지표(key)를 같은 성격의 장기 지표(proxyFn)로 앞쪽을 이어 붙여 outKey에 담는다.
+ * 겹치는 구간에서 (proxy − 실제값)의 중앙값을 수준 차이(offset)로 보고, 실제값이 없는 행은
+ * proxy − offset 으로 채운다. 실제값이 있는 행은 그대로 쓴다. 행 객체를 직접 고친다(대용량 복사 방지).
+ *  - r[outKey]            : 이어 붙인 값
+ *  - r[`${outKey}_proxied`] : 환산값이면 true
+ * 겹치는 관측치가 minOverlap 미만이면 환산하지 않고 실제값만 outKey에 복사한다.
+ * @returns {{offset:number|null, overlap:number, realStart:string|null}}
+ */
+export function spliceWithOffset(rows, key, proxyFn, outKey, { minOverlap = 10 } = {}) {
+  const ok = (v) => v !== null && v !== undefined && Number.isFinite(v);
+  const diffs = [];
+  let realStart = null;
+  for (const r of rows) {
+    if (!ok(r[key])) continue;
+    if (realStart === null) realStart = r.date;
+    const p = proxyFn(r);
+    if (ok(p)) diffs.push(p - r[key]);
+  }
+  const offset = diffs.length >= minOverlap ? median(diffs) : null;
+  for (const r of rows) {
+    if (ok(r[key])) { r[outKey] = r[key]; r[`${outKey}_proxied`] = false; continue; }
+    const p = offset === null ? null : proxyFn(r);
+    r[outKey] = ok(p) ? p - offset : null;
+    r[`${outKey}_proxied`] = ok(p);
+  }
+  return { offset, overlap: diffs.length, realStart };
+}
+
+/**
  * 시작일~종료일 필터 (양 끝 포함). 연간(date='YYYY')은 연도 단위로 비교.
  */
 export function filterByDate(rows, start, end) {

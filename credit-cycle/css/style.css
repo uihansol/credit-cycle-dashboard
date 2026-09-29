@@ -298,6 +298,60 @@ input[type="range"] { accent-color: var(--accent); }
 .meter__mark { position: absolute; top: -4px; width: 3px; height: 14px; background: var(--ink); border-radius: 2px; transform: translateX(-50%); }
 .meter__labels { display: flex; justify-content: space-between; font-size: 0.7rem; color: var(--muted); }
 
+/* ---------------------------------------------------- 탭 */
+.tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--line-2);
+  position: sticky;
+  top: 0;
+  z-index: 15;
+  background: var(--bg);
+  padding-top: 6px;
+  margin-bottom: -4px;
+  overflow-x: auto;
+}
+.tabs button {
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 650;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  padding: 10px 16px 9px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tabs button small { font-size: 0.72rem; font-weight: 600; margin-left: 3px; color: var(--forecast); }
+.tabs button:hover { color: var(--ink); }
+.tabs button[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
+.tab-panel { display: flex; flex-direction: column; gap: 16px; }
+.tab-panel[hidden] { display: none; }
+
+/* ---------------------------------------------------- 사이클 맵 */
+.map-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 24px;
+  align-items: flex-end;
+  padding: 10px 0 6px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 6px;
+}
+.option-row { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; min-height: 30px; }
+.map-hint {
+  margin: 6px 0 0;
+  font-size: 0.8rem;
+  color: #7d5a12;
+  background: var(--info-bg);
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+.pill--vix { color: var(--forecast); border-color: #d9ccef; background: var(--forecast-soft); font-weight: 650; white-space: nowrap; }
+.chart--map { height: 720px; }
+.chart-panel--wide { grid-column: 1 / -1; }
+
 /* ---------------------------------------------------- 궤적 + 전망 */
 .workspace {
   display: grid;
@@ -327,8 +381,8 @@ input[type="range"] { accent-color: var(--accent); }
   gap: 12px;
   border-top: 4px solid var(--forecast);
   position: sticky;
-  top: 12px;
-  max-height: calc(100vh - 24px);
+  top: 60px;  /* 위에 고정된 탭 막대 높이만큼 */
+  max-height: calc(100vh - 72px);
   overflow: auto;
 }
 .forecast-panel__head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
@@ -422,6 +476,9 @@ input[type="range"] { accent-color: var(--accent); }
   .period__dates input { flex: 1; min-width: 0; }
   .chart--small { height: 230px; }
   .chart--large { height: 460px; }
+  .chart--map { height: 520px; }
+  .tabs button { padding: 9px 11px 8px; font-size: 0.9rem; }
+  .map-controls .toolbar__group { width: auto; }
   .chart-panel, .chart-panel--hero { padding: 14px 10px 8px; }
   .kpi__value { font-size: 1.3rem; }
   .phase-card { padding: 14px; }

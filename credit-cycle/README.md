@@ -24,7 +24,7 @@ FRED → GitHub Actions → credit-cycle/data/*.csv → GitHub Pages → 브라�
     │   └── app.js           # 상태·컨트롤 연결 (진단 카드, 전망 패널, 흐름 재생, 주소 공유)
     ├── tests/unit.test.mjs  # 순수 함수 유닛 테스트 (`node --test tests/unit.test.mjs`)
     ├── scripts/update_fred.py   # Actions가 실행하는 다운로드·병합 스크립트
-    └── data/   # Actions가 채움: BAA/AAA/GS10/GS2, DBAA/DAAA/DGS10/DGS2, HY/HYM(하이일드 OAS), BBB/BBBM(BBB 회사채 OAS), USREC(침체 판정) + meta.json
+    └── data/   # Actions가 채움: BAA/AAA/GS10/GS2, DBAA/DAAA/DGS10/DGS2, HY/HYM(하이일드 OAS), BBB/BBBM(BBB 회사채 OAS), VIX/VIXM(변동성 지수), USREC(침체 판정) + meta.json
 ```
 
 ## 1. 올리기
@@ -66,10 +66,18 @@ Settings → Pages → Source: **Deploy from a branch** → Branch `main` / `(ro
 `index.html`을 더블클릭하면 fetch가 막힙니다. `credit-cycle` 폴더에서 `python -m http.server` 후 http://localhost:8000 으로 여세요.
 
 ## 7. 화면에 있는 기능들
-- **신용 지표(가로축)**: V2(Baa−10Y), V4(Baa/Aaa), V6(하이일드 OAS), V7(BBB 회사채 OAS)
-  - V7은 ICE BofA BBB US Corporate Index OAS(`BAMLC0A4CBBB`)입니다. BBB는 투자등급 중 가장 낮은 등급(하이일드 바로 위)입니다.
-    V6와 같은 ICE BofA 계열이라 FRED의 공개 기간 제한(최근 3년)이 적용될 수 있습니다. 저장소에 BBB 파일이 아직 없으면
-    이 버전만 “데이터 없음” 안내가 뜨고 나머지 버전은 그대로 동작합니다(`config.js`의 `OPTIONAL_KEYS`).
+- **화면 구성(탭)**: 위쪽 진단 카드 아래에 탭 3개 — **궤적·전망** / **사이클 맵(VIX)** / **시계열** (탭 막대는 스크롤해도 위에 고정)
+- **신용 지표(가로축)**: V2(Baa−10Y), V4(Baa/Aaa), V6(하이일드 OAS), V7(BBB 회사채 스프레드)
+  - V7: 최근 3년은 ICE BofA BBB US Corporate OAS(`BAMLC0A4CBBB`) 실제값, 그 이전은 같은 등급대인 Moody's Baa(= BBB 상당)의
+    10년물 대비 스프레드를 겹치는 기간의 중앙값 차이만큼 보정해 이어 붙여 **1976년(월간)·1986년(일간)부터** 이어집니다
+    (`transform.js`의 `spliceWithOffset()`, 화면 안내문에 보정값 표시). FRED는 ICE BofA 시리즈를 최신판뿐 아니라
+    과거 판(ALFRED)에서도 최근 3년만 제공해서 실제 ICE BBB 과거값은 받을 수 없습니다 (`update_fred.py`의 과거 판 보충 시도 로그로 확인).
+  - 저장소에 BBB 파일이 없으면 이 버전만 “데이터 없음” 안내가 뜨고 나머지는 그대로 동작합니다(`config.js`의 `OPTIONAL_KEYS`).
+- **사이클 맵(VIX) 탭**: 가로 = 신용 지표, 세로 = 10Y/2Y 비율(기본) 또는 금리차
+  - 원의 색 = 연도 그라데이션(viridis, 과거 보라 → 최근 노랑), **원의 크기 = 그 시점의 VIX**(크면 변동성↑·궤적이 빠르게 움직인 구간)
+  - 가로·세로 **로그 스케일** 선택 (기본 둘 다 켜짐). 금리차처럼 음수가 있는 축은 로그가 불가능해 안내 후 선형으로 표시
+  - 4분면 배경 + 순환 화살표(#1 위험 → #2 회복 → #3 확장 → #4 둔화), 날짜 라벨, 연결선, 원 크기 고정 선택
+  - VIX는 1990년부터라 그 이전 시점은 작은 회색 테두리 원으로 표시
 - **금리 구조(세로축)**: 10Y−2Y 금리차(%p, 기본) 또는 10Y/2Y 비율. 역전선은 금리차 0 / 비율 1.
   (비율은 2Y≈0이던 2011~2021년에 값이 크게 튀어 최근 구간이 눌려 보이므로 금리차를 기본으로 둡니다.)
 - **자료 빈도**: 일 / 주 / 월 / 연. 주간은 일간 CSV를 브라우저에서 주평균(월~일, 금요일 마감 주)해서 만듭니다 —
@@ -101,6 +109,8 @@ Settings → Pages → Source: **Deploy from a branch** → Branch `main` / `(ro
 | 전망 방식 조정 (유사 시점 수, 모멘텀 기간·가중치, 간격, 전망 기간) | `config.js`의 `FORECAST` |
 | 전망 알고리즘 교체/개선 | `forecast.js`의 `findAnalogs()` / `projectFromAnalogs()` / `summarizeProjection()` |
 | 진단 문구·신호 규칙 | `forecast.js`의 `diagnose()`와 `FLOW_TEXT` |
+| 짧은 지표를 장기 지표로 이어 붙이기 | `config.js` 버전에 `splice: {key, out, proxy, proxyLabel}` → `app.js`의 `ensureRows()`가 처리 |
+| 사이클 맵 기본값(세로축·로그·원 크기) | `config.js`의 `MAP_DEFAULTS`, 그리기는 `charts.js`의 `renderCycleMap()` |
 | 새 빈도 추가 | `config.js`의 `FREQUENCIES`에 `{source, aggregate?, stepsPerMonth}` + 필요하면 `transform.js`에 집계 함수 |
 | 새 버전(V8 등) 추가 | `config.js`의 `VERSIONS`에 객체 하나만 추가 (메뉴·그래프·카드 자동 반영) |
 | 새 지표(시리즈) 추가 | `scripts/update_fred.py`의 `SERIES`에 `{fred_id, start}` 추가 → `config.js`의 `FREQUENCIES[*].files`에 매핑 |

@@ -348,14 +348,19 @@ export function vixToSize(vix, freq) {
  * @param {{date:string,x:number,y:number,raw:object}[]} points
  * @param {{freq:string, xLabel:string, yLabel:string, xShort:string, yShort:string, xDigits:number, yDigits:number,
  *          logX:boolean, logY:boolean, sizeMode:'vix'|'fixed', showLine:boolean, showLabels:boolean,
- *          showCycle:boolean, xSplit:number, yInversion:number, markerSize:number}} opts
+ *          showCycle:boolean, xSplit:number, yInversion:number, markerSize:number,
+ *          extent?:{date:string,x:number,y:number}[], playDate?:string}} opts
+ *   extent: 축 범위·색 범위를 정할 전체 점들. 흐름 재생처럼 일부 점만 그릴 때 화면이 흔들리지 않게 한다 (기본: points).
+ *   playDate: 재생 중일 때 화면 가운데에 크게 보여 줄 날짜 라벨.
  */
 export function renderCycleMap(el, points, opts) {
   const mobile = isMobile();
   const n = points.length;
+  const ext = opts.extent || points;
   const labels = points.map((p) => formatDateLabel(p.date, opts.freq));
   const years = points.map((p) => fracYear(p.date));
-  const y0 = years[0], y1 = Math.max(years[n - 1], years[0] + 0.01);
+  const extYears = ext.map((p) => fracYear(p.date));
+  const y0 = Math.min(...extYears), y1 = Math.max(Math.max(...extYears), y0 + 0.01);
   const vix = points.map((p) => (Number.isFinite(p.raw?.VIX) ? p.raw.VIX : null));
   const useVix = opts.sizeMode === 'vix';
   const gl = n > GL_THRESHOLD;
@@ -443,7 +448,7 @@ export function renderCycleMap(el, points, opts) {
   traces.push({
     type: 'scatter', mode: mobile ? 'markers' : 'markers+text',
     x: [cur.x], y: [cur.y], customdata: [custom[n - 1]],
-    text: [`<b>현재 (${labels[n - 1]})</b>`], textposition: 'top right', textfont: { size: 12, color: CURRENT_COLOR },
+    text: [`<b>${opts.playDate ? labels[n - 1] : `현재 (${labels[n - 1]})`}</b>`], textposition: 'top right', textfont: { size: 12, color: CURRENT_COLOR },
     marker: {
       size: Math.max(16, useVix && vix[n - 1] !== null ? vixToSize(vix[n - 1], opts.freq) + 6 : 16),
       color: 'rgba(192,57,43,0.18)', line: { width: 2.5, color: CURRENT_COLOR },
@@ -454,7 +459,7 @@ export function renderCycleMap(el, points, opts) {
   // --- 배경: 4분면 (X 기준선 + 역전선)
   const shapes = [];
   const annotations = [];
-  const xs = points.map((p) => p.x), ys = points.map((p) => p.y);
+  const xs = ext.map((p) => p.x), ys = ext.map((p) => p.y);
   const xMin = Math.min(...xs), xMax = Math.max(...xs), yMin = Math.min(...ys), yMax = Math.max(...ys);
   const xs0 = Number.isFinite(opts.xSplit) ? opts.xSplit : (xMin + xMax) / 2;
   const inv = Number.isFinite(opts.yInversion) ? opts.yInversion : 1;
@@ -511,6 +516,13 @@ export function renderCycleMap(el, points, opts) {
   // 역전선
   if (yValidInv && yaL >= yr[0] && yaL <= yr[1]) {
     shapes.push({ type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'y', y0: inv, y1: inv, line: { color: REF_LINE_COLOR, width: 1.2, dash: 'dash' } });
+  }
+  // 흐름 재생 중: 지금 어느 시점인지 화면 가운데에 크게(연하게) 보여 준다
+  if (opts.playDate) {
+    annotations.push({
+      xref: 'paper', yref: 'paper', x: 0.5, y: 0.52, xanchor: 'center', yanchor: 'middle', showarrow: false,
+      text: `<b>${opts.playDate}</b>`, font: { size: mobile ? 34 : 64, color: 'rgba(31,42,55,0.13)' },
+    });
   }
 
   const layout = baseLayout(mobile);

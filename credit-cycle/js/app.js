@@ -62,7 +62,7 @@ const el = {
   optArrows: $('opt-arrows'), optRecent: $('opt-recent'), optForecast: $('opt-forecast'),
   colorMode: $('color-mode'),
   tabs: document.querySelectorAll('[role="tab"][data-tab]'),
-  chartMap: $('chart-map'), chartVix: $('chart-vix'), mapSub: $('map-sub'), mapVixNow: $('map-vix-now'),
+  mapPlay: $('map-play'), chartMap: $('chart-map'), chartVix: $('chart-vix'), mapSub: $('map-sub'), mapVixNow: $('map-vix-now'),
   mapSizeSeg: $('map-size-seg'), mapHint: $('map-hint'), viewTitle: $('view-title'), sizeLabel: $('size-label'),
   viewGroups: document.querySelectorAll('[data-tabs]'),
   mapLogX: $('map-logx'), mapLogY: $('map-logy'), mapLine: $('map-line'), mapLabels: $('map-labels'), mapCycle: $('map-cycle'),
@@ -391,7 +391,8 @@ function zoomRange(points, proj, fcfg) {
 }
 
 // ------------------------------------------------------------ 사이클 맵
-function drawCycleMap(hist) {
+/** upto: 흐름 재생 중에는 앞에서 upto개 점까지만 그린다 (축·색 범위는 전체 기준으로 고정, 안내·VIX 표시는 건드리지 않음) */
+function drawCycleMap(hist, { upto = null } = {}) {
   const v = VERSIONS[state.version];
   const m = state.map;
   const y = Y_AXES[state.yAxis];
@@ -413,26 +414,31 @@ function drawCycleMap(hist) {
       ? 'VIX 데이터가 아직 저장소에 없어 원 크기를 고정으로 표시합니다 (GitHub Actions 업데이트 후 반영).'
       : '선택한 기간에는 VIX 값이 없어 원 크기를 고정으로 표시합니다.');
   }
-  el.mapHint.textContent = hints.join(' ');
-  el.mapHint.hidden = !hints.length;
+  if (!upto) {
+    el.mapHint.textContent = hints.join(' ');
+    el.mapHint.hidden = !hints.length;
 
-  // 최신 VIX: 마지막 점에 없으면(휴장·발표 지연) 가까운 이전 값을 날짜와 함께 보여 준다
-  let vixPt = null;
-  for (let i = points.length - 1; i >= Math.max(0, points.length - 15); i--) {
-    if (Number.isFinite(points[i].raw?.VIX)) { vixPt = points[i]; break; }
-  }
-  el.mapVixNow.hidden = !vixPt;
-  if (vixPt) {
-    const same = vixPt === points[points.length - 1];
-    el.mapVixNow.textContent = `현재 VIX ${vixPt.raw.VIX.toFixed(1)}${same ? '' : ` (${formatDateLabel(vixPt.date, state.freq)})`}`;
+    // 최신 VIX: 마지막 점에 없으면(휴장·발표 지연) 가까운 이전 값을 날짜와 함께 보여 준다
+    let vixPt = null;
+    for (let i = points.length - 1; i >= Math.max(0, points.length - 15); i--) {
+      if (Number.isFinite(points[i].raw?.VIX)) { vixPt = points[i]; break; }
+    }
+    el.mapVixNow.hidden = !vixPt;
+    if (vixPt) {
+      const same = vixPt === points[points.length - 1];
+      el.mapVixNow.textContent = `현재 VIX ${vixPt.raw.VIX.toFixed(1)}${same ? '' : ` (${formatDateLabel(vixPt.date, state.freq)})`}`;
+    }
   }
 
-  renderCycleMap(el.chartMap, points, {
+  const shown = upto ? points.slice(0, upto) : points;
+  renderCycleMap(el.chartMap, shown, {
     freq: state.freq, xLabel: v.xLabel, yLabel: y.label, xShort: v.xShort, yShort: y.short,
     xDigits: v.digits, yDigits: y.digits, logX, logY,
     sizeMode: m.sizeMode === 'vix' && hasVix ? 'vix' : 'fixed', markerSize: state.markerSize + 2,
     showLine: m.line, showLabels: m.labels, showCycle: m.cycle,
     xSplit: hist?.xSplit, yInversion: y.inversion,
+    extent: points,
+    playDate: upto ? formatDateLabel(shown[shown.length - 1].date, state.freq) : undefined,
   });
 }
 
@@ -637,23 +643,36 @@ function renderForecastPanel(fc, hist, diag) {
 // ------------------------------------------------------------ 흐름 재생
 let playTimer = null;
 
+/** 궤적 탭·사이클 맵 탭의 재생 버튼이 같은 상태를 보이게 한다 */
+function setPlayUi(on) {
+  [el.play, el.mapPlay].forEach((b) => {
+    b.textContent = on ? '❚❚ 멈춤' : '▶ 흐름 재생';
+    b.setAttribute('aria-pressed', String(on));
+  });
+}
+
+/** 보고 있는 탭(사이클 맵 / 궤적)의 점들을 과거부터 시간순으로 하나씩 그려 나간다. */
 function startPlay() {
   const points = currentPoints();
   if (points.length < 3) return;
   const hist = analysisHistory();
-  const pad = (arr) => {
-    const lo = Math.min(...arr), hi = Math.max(...arr);
-    const p = (hi - lo) * 0.06 || 0.1;
-    return [lo - p, hi + p];
-  };
-  const range = { x: pad(points.map((p) => p.x)), y: pad(points.map((p) => p.y)) };
   const frames = Math.min(points.length, 150);
+  let draw;
+  if (state.tab === 'map') {
+    draw = (n) => drawCycleMap(hist, { upto: n });
+  } else {
+    const pad = (arr) => {
+      const lo = Math.min(...arr), hi = Math.max(...arr);
+      const p = (hi - lo) * 0.06 || 0.1;
+      return [lo - p, hi + p];
+    };
+    const range = { x: pad(points.map((p) => p.x)), y: pad(points.map((p) => p.y)) };
+    draw = (n) => drawTrajectory(points.slice(0, n), { hist, fc: null, fixedRange: range, noForecast: true });
+  }
   let f = 1;
-  el.play.textContent = '❚❚ 멈춤';
-  el.play.setAttribute('aria-pressed', 'true');
+  setPlayUi(true);
   playTimer = setInterval(() => {
-    const n = Math.max(2, Math.round((points.length * f) / frames));
-    drawTrajectory(points.slice(0, n), { hist, fc: null, fixedRange: range, noForecast: true });
+    draw(Math.max(2, Math.round((points.length * f) / frames)));
     f += 1;
     if (f > frames) stopPlay();
   }, 70);
@@ -663,8 +682,7 @@ function stopPlay({ silent = false } = {}) {
   if (!playTimer) return;
   clearInterval(playTimer);
   playTimer = null;
-  el.play.textContent = '▶ 흐름 재생';
-  el.play.setAttribute('aria-pressed', 'false');
+  setPlayUi(false);
   if (!silent) render();
 }
 
@@ -816,7 +834,7 @@ function bindControls() {
     else if (state.tab === 'map' && state.map.sizeMode === 'fixed' && state.rows[state.freq]) render();
   });
   el.reload.addEventListener('click', () => loadAndRender({ refresh: true }));
-  el.play.addEventListener('click', () => (playTimer ? stopPlay() : startPlay()));
+  [el.play, el.mapPlay].forEach((b) => b.addEventListener('click', () => (playTimer ? stopPlay() : startPlay())));
   el.zoom.addEventListener('click', () => {
     state.zoomCurrent = !state.zoomCurrent;
     el.zoom.setAttribute('aria-pressed', String(state.zoomCurrent));

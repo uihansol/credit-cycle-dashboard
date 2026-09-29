@@ -66,12 +66,17 @@ async function fetchCsv(seriesId, { bust = false } = {}) {
 
 const cache = new Map(); // seriesId → Map
 
+/** 가장 최근 loadSeries()에서 optional로 허용하고 건너뛴 시리즈 키 → 사유 */
+export const skippedSeries = new Map();
+
 /**
  * 여러 시리즈를 동시에 불러온다. 하나라도 실패하면 실패한 파일 목록 전체를 담아 throw.
+ * optional에 든 키는 실패해도 오류로 치지 않고 빈 Map으로 채운다 (skippedSeries에 사유 기록).
  * @param {Record<string,string>} files  { BAA:'DBAA', ... }
+ * @param {{refresh?:boolean, optional?:string[]}} [opts]
  * @returns {Promise<Record<string, Map<string, number|null>>>}
  */
-export async function loadSeries(files, { refresh = false } = {}) {
+export async function loadSeries(files, { refresh = false, optional = [] } = {}) {
   const entries = Object.entries(files);
   const results = await Promise.allSettled(
     entries.map(async ([, id]) => {
@@ -85,8 +90,11 @@ export async function loadSeries(files, { refresh = false } = {}) {
   const out = {};
   results.forEach((r, i) => {
     const [key, id] = entries[i];
-    if (r.status === 'fulfilled') out[key] = r.value;
-    else failures.push(r.reason?.file ? r.reason : { file: `${id}.csv`, reason: String(r.reason) });
+    if (r.status === 'fulfilled') { out[key] = r.value; skippedSeries.delete(key); }
+    else if (optional.includes(key)) {
+      out[key] = new Map();
+      skippedSeries.set(key, r.reason?.reason || String(r.reason));
+    } else failures.push(r.reason?.file ? r.reason : { file: `${id}.csv`, reason: String(r.reason) });
   });
   if (failures.length) throw new DataLoadError(failures);
   return out;

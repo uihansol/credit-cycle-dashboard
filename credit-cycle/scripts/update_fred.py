@@ -36,6 +36,7 @@ API_KEY = os.environ.get("FRED_API_KEY", "").strip()
 MONTHLY_START = "1976-06-01"   # GS2 시작 시점
 DAILY_START = "1986-01-02"     # DBAA/DAAA 시작 시점
 HY_START = "1996-12-31"        # BAMLH0A0HYM2(하이일드 OAS) 시작 시점
+BBB_START = "1996-12-31"       # BAMLC0A4CBBB(BBB 회사채 OAS) 시작 시점
 RECESSION_START = "1976-01-01"  # USREC — 우리 대시보드의 공통 시작보다 넉넉히 이르게
 
 # key(파일명) → { fred_id, start, fq?, fam? }
@@ -58,6 +59,11 @@ SERIES: dict[str, dict] = {
     #       start를 이보다 이르게 줘도 실제로는 최근 3년치만 내려온다.
     "HY": {"fred_id": "BAMLH0A0HYM2", "start": HY_START},
     "HYM": {"fred_id": "BAMLH0A0HYM2", "start": HY_START, "fq": "Monthly", "fam": "avg"},
+    # BBB 등급 회사채 스프레드 (ICE BofA BBB US Corporate Index OAS). 투자등급 중 가장 낮은 등급으로
+    # 하이일드 바로 위에 있어 신용 경계 신호가 빠르다. HY와 같은 ICE BofA 시리즈라 FRED 공개 기간
+    # 제한(최근 3년)이 똑같이 적용될 수 있다 — 짧으면 대시보드가 V2(Baa−10Y) 이력으로 보완한다.
+    "BBB": {"fred_id": "BAMLC0A4CBBB", "start": BBB_START},
+    "BBBM": {"fred_id": "BAMLC0A4CBBB", "start": BBB_START, "fq": "Monthly", "fam": "avg"},
     # NBER 경기침체 판정 (0/1, 월간) — 침체 음영 표시용
     "USREC": {"fred_id": "USREC", "start": RECESSION_START},
 }

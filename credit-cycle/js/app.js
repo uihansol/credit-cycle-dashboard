@@ -2,10 +2,10 @@
 // app.js — 상태 관리 + UI 연결 (진입점)
 // ============================================================
 import {
-  FREQUENCIES, VERSIONS, Y_AXES, REQUIRED_KEYS, RECESSION_FILE, FORECAST,
+  FREQUENCIES, VERSIONS, Y_AXES, REQUIRED_KEYS, OPTIONAL_KEYS, RECESSION_FILE, FORECAST,
   DEFAULT_FREQ, DEFAULT_VERSION, DEFAULT_MARKER_SIZE, DEFAULT_Y_AXIS,
 } from './config.js';
-import { loadSeries, loadMeta, DataLoadError } from './data-loader.js';
+import { loadSeries, loadMeta, DataLoadError, skippedSeries } from './data-loader.js';
 import {
   alignSeries, aggregateAnnualMean, aggregateWeeklyMean, filterByDate, computePoints,
   formatDateLabel, computeRecessionPeriods, computeSpeeds, toAxisDate, addSteps, median,
@@ -61,7 +61,8 @@ const el = {
 };
 
 // ------------------------------------------------------------ 알림
-function showNotice(kind, html) {
+function showNotice(kind, html, tag = '') {
+  el.notice.dataset.tag = tag; // 'nodata' 등 — 상황이 바뀌면 render()가 스스로 지울 수 있게 표식
   el.notice.className = `notice notice--${kind}`;
   el.notice.innerHTML = html;
   el.notice.hidden = false;
@@ -95,11 +96,12 @@ const horizonLabel = (months) => (months % 12 === 0 ? `${months / 12}년` : `${m
 async function ensureRows(freq, { refresh = false } = {}) {
   if (!refresh && state.rows[freq]) return state.rows[freq];
   const cfg = FREQUENCIES[freq];
-  const maps = await loadSeries(cfg.files, { refresh });
+  const maps = await loadSeries(cfg.files, { refresh, optional: OPTIONAL_KEYS });
   let rows = alignSeries(maps, REQUIRED_KEYS).filter((r) => r.date >= cfg.minDate);
   state.latest[freq] = rows.length ? rows[rows.length - 1].date : '';
-  if (cfg.aggregate === 'annualMean') rows = aggregateAnnualMean(rows);
-  if (cfg.aggregate === 'weeklyMean') rows = aggregateWeeklyMean(rows);
+  const keys = Object.keys(cfg.files);
+  if (cfg.aggregate === 'annualMean') rows = aggregateAnnualMean(rows, keys);
+  if (cfg.aggregate === 'weeklyMean') rows = aggregateWeeklyMean(rows, keys);
   state.rows[freq] = rows;
   analysisCache.clear();
   return rows;
@@ -248,6 +250,8 @@ function currentPoints() {
 
 function render() {
   stopPlay({ silent: true });
+  // 이전 렌더링의 "데이터 없음" 안내는 버전·빈도가 바뀌면 더 이상 맞지 않으므로 여기서 지운다.
+  if (el.notice.dataset.tag === 'nodata') clearNotice();
   const v = VERSIONS[state.version];
   const y = Y_AXES[state.yAxis];
   const fcfg = FREQUENCIES[state.freq];
@@ -269,7 +273,11 @@ function render() {
     [el.chartX, el.chartY, el.chartTraj].forEach(clearChart);
     el.diagnosis.innerHTML = '';
     el.forecastBody.innerHTML = '<p class="empty">표시할 관측치가 없습니다.</p>';
-    showNotice('info', `<p>선택한 기간에는 ${v.xShort}·${y.short} 지표가 모두 있는 관측치가 없습니다. 기간을 넓혀 보세요.</p>`);
+    if (v.needs && skippedSeries.has(v.needs)) {
+      showNotice('info', `<p><strong>${v.xShort} 데이터가 아직 저장소에 없습니다.</strong> GitHub Actions의 “Update FRED data”를 한 번 실행하면 받아옵니다. FRED가 이 시리즈를 공개하지 않는 경우에는 받아오지 못할 수 있습니다.</p><p>(${escapeHtml(String(skippedSeries.get(v.needs)))})</p>`, 'nodata');
+    } else {
+      showNotice('info', `<p>선택한 기간에는 ${v.xShort}·${y.short} 지표가 모두 있는 관측치가 없습니다. 기간을 넓혀 보세요.</p>`);
+    }
     return;
   }
 

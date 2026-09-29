@@ -15,7 +15,7 @@ FRED → GitHub Actions → credit-cycle/data/*.csv → GitHub Pages → 브라�
     ├── index.html
     ├── css/style.css
     ├── js/
-    │   ├── config.js        # 시리즈·빈도(일/주/월/연)·버전(V2/V4/V6)·세로축·전망 설정  ← 새 버전/지표 추가
+    │   ├── config.js        # 시리즈·빈도(일/주/월/연)·버전(V2/V4/V6/V7)·세로축·전망 설정  ← 새 버전/지표 추가
     │   ├── data-loader.js   # ./data/*.csv 읽기·파싱·오류 수집
     │   ├── transform.js     # 정렬·결측 제거·주평균/연평균·기간 필터·X/Y 계산·침체 구간·이동 속도 (순수 함수)
     │   ├── forecast.js      # 유사 국면 탐색·전망 경로·국면 가능성·현재 진단 (순수 함수)
@@ -24,7 +24,7 @@ FRED → GitHub Actions → credit-cycle/data/*.csv → GitHub Pages → 브라�
     │   └── app.js           # 상태·컨트롤 연결 (진단 카드, 전망 패널, 흐름 재생, 주소 공유)
     ├── tests/unit.test.mjs  # 순수 함수 유닛 테스트 (`node --test tests/unit.test.mjs`)
     ├── scripts/update_fred.py   # Actions가 실행하는 다운로드·병합 스크립트
-    └── data/   # Actions가 채움: BAA/AAA/GS10/GS2, DBAA/DAAA/DGS10/DGS2, HY/HYM(하이일드 OAS), USREC(침체 판정) + meta.json
+    └── data/   # Actions가 채움: BAA/AAA/GS10/GS2, DBAA/DAAA/DGS10/DGS2, HY/HYM(하이일드 OAS), BBB/BBBM(BBB 회사채 OAS), USREC(침체 판정) + meta.json
 ```
 
 ## 1. 올리기
@@ -66,7 +66,10 @@ Settings → Pages → Source: **Deploy from a branch** → Branch `main` / `(ro
 `index.html`을 더블클릭하면 fetch가 막힙니다. `credit-cycle` 폴더에서 `python -m http.server` 후 http://localhost:8000 으로 여세요.
 
 ## 7. 화면에 있는 기능들
-- **신용 지표(가로축)**: V2(Baa−10Y), V4(Baa/Aaa), V6(하이일드 OAS)
+- **신용 지표(가로축)**: V2(Baa−10Y), V4(Baa/Aaa), V6(하이일드 OAS), V7(BBB 회사채 OAS)
+  - V7은 ICE BofA BBB US Corporate Index OAS(`BAMLC0A4CBBB`)입니다. BBB는 투자등급 중 가장 낮은 등급(하이일드 바로 위)입니다.
+    V6와 같은 ICE BofA 계열이라 FRED의 공개 기간 제한(최근 3년)이 적용될 수 있습니다. 저장소에 BBB 파일이 아직 없으면
+    이 버전만 “데이터 없음” 안내가 뜨고 나머지 버전은 그대로 동작합니다(`config.js`의 `OPTIONAL_KEYS`).
 - **금리 구조(세로축)**: 10Y−2Y 금리차(%p, 기본) 또는 10Y/2Y 비율. 역전선은 금리차 0 / 비율 1.
   (비율은 2Y≈0이던 2011~2021년에 값이 크게 튀어 최근 구간이 눌려 보이므로 금리차를 기본으로 둡니다.)
 - **자료 빈도**: 일 / 주 / 월 / 연. 주간은 일간 CSV를 브라우저에서 주평균(월~일, 금요일 마감 주)해서 만듭니다 —
@@ -80,7 +83,7 @@ Settings → Pages → Source: **Deploy from a branch** → Branch `main` / `(ro
   - 궤적 위: 유사 시점 경로(가는 보라 선), 가중 평균 예상 경로(굵은 점선+화살표), 도달 범위 타원(약 68%)
   - 시계열 위: 예상 경로와 25–75% / 10–90% 부채꼴
   - 패널: 국면별 가능성, 스프레드 확대·커브 가팔라짐 가능성, 유사 시점 이후 침체 동반 비율(평소 비율과 비교), 유사 시점 목록(누르면 그때 실제 궤적 강조)
-  - V6(하이일드)는 자체 이력이 짧아, 겹치는 기간의 로그-로그 회귀로 Baa−10Y 장기 이력을 하이일드 척도로 환산해 과거 유사 시점을 찾습니다
+  - V6(하이일드)·V7(BBB)은 자체 이력이 짧아, 겹치는 기간의 로그-로그 회귀로 Baa−10Y 장기 이력을 하이일드 척도로 환산해 과거 유사 시점을 찾습니다
     (화면의 궤적은 실제 하이일드 값만 표시, 회귀 R²는 버전 안내문에 표시).
   - 통계적 예측 모형이 아니라 “역사가 비슷하게 흘러간다면”이라는 참고용 시나리오입니다.
 - **궤적 도구**: ⌖ 현재 부근 확대(최근 3년+전망 범위), ▶ 흐름 재생(궤적이 시간순으로 그려지는 애니메이션)

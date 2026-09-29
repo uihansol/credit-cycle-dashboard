@@ -13,6 +13,12 @@ export const DATA_PATH = './data/';
 export const REQUIRED_KEYS = ['GS10', 'GS2'];
 
 /**
+ * 저장소에 파일이 아직 없어도 화면 전체가 오류로 멈추지 않게 하는 시리즈 키.
+ * (Actions가 처음 받아오기 전이거나 FRED가 시리즈를 막았을 때 — 이 키를 쓰는 버전만 "데이터 없음"으로 안내한다.)
+ */
+export const OPTIONAL_KEYS = ['BBB'];
+
+/**
  * 빈도별 원천 파일. key는 계산식에서 쓰는 공통 이름.
  * 연간(annual)은 월간 파일을 연평균해서 만든다 (별도 파일 없음).
  * HYM은 FRED에 월평균 변환을 요청해 만든 하이일드 스프레드의 월간판.
@@ -23,7 +29,7 @@ export const FREQUENCIES = {
     source: 'daily',
     minDate: '1986-01-02',
     stepsPerMonth: 21,          // 영업일 기준 한 달 ≈ 21개 관측치 (전망 기간 환산용)
-    files: { BAA: 'DBAA', AAA: 'DAAA', GS10: 'DGS10', GS2: 'DGS2', HY: 'HY' },
+    files: { BAA: 'DBAA', AAA: 'DAAA', GS10: 'DGS10', GS2: 'DGS2', HY: 'HY', BBB: 'BBB' },
   },
   weekly: {
     label: '주',
@@ -31,14 +37,14 @@ export const FREQUENCIES = {
     aggregate: 'weeklyMean',    // 주(월~일, 금요일 마감) 평균으로 집계
     minDate: '1986-01-02',
     stepsPerMonth: 52 / 12,
-    files: { BAA: 'DBAA', AAA: 'DAAA', GS10: 'DGS10', GS2: 'DGS2', HY: 'HY' },
+    files: { BAA: 'DBAA', AAA: 'DAAA', GS10: 'DGS10', GS2: 'DGS2', HY: 'HY', BBB: 'BBB' },
   },
   monthly: {
     label: '월',
     source: 'monthly',
     minDate: '1976-06-01',
     stepsPerMonth: 1,
-    files: { BAA: 'BAA', AAA: 'AAA', GS10: 'GS10', GS2: 'GS2', HY: 'HYM' },
+    files: { BAA: 'BAA', AAA: 'AAA', GS10: 'GS10', GS2: 'GS2', HY: 'HYM', BBB: 'BBBM' },
   },
   annual: {
     label: '연',
@@ -46,7 +52,7 @@ export const FREQUENCIES = {
     aggregate: 'annualMean',    // 연평균으로 집계
     minDate: '1976-06-01',
     stepsPerMonth: 1 / 12,
-    files: { BAA: 'BAA', AAA: 'AAA', GS10: 'GS10', GS2: 'GS2', HY: 'HYM' },
+    files: { BAA: 'BAA', AAA: 'AAA', GS10: 'GS10', GS2: 'GS2', HY: 'HYM', BBB: 'BBBM' },
   },
 };
 
@@ -148,5 +154,19 @@ export const VERSIONS = {
     // 겹치는 기간 회귀로 하이일드 척도로 환산해 앞에 이어 붙인다. 화면에는 실제 값만 그린다.
     proxy: 'V2',
     note: 'ICE BofA US High Yield 지수의 옵션조정스프레드(OAS)입니다. FRED가 2026년 4월부터 이 시리즈를 최근 3년치만 공개해서, 실제로 표시되는 기간은 그보다 짧을 수 있습니다.',
+  },
+  V7: {
+    label: 'V7 — BBB 회사채 OAS',
+    menu: 'BBB OAS',
+    xLabel: 'ICE BofA BBB 회사채 OAS (%)',
+    xShort: 'BBB OAS',
+    compute: (r) => (r.BBB === null || r.BBB === undefined ? null : r.BBB),
+    digits: 2,
+    unit: '%',
+    deltaMode: 'mul',
+    minDate: '1996-12-31',
+    needs: 'BBB',                // 이 키의 데이터가 저장소에 있어야 그려진다 (OPTIONAL_KEYS)
+    proxy: 'V2',                 // 자체 이력이 짧으면 Baa−10Y 장기 이력으로 전망 계산을 보완
+    note: 'ICE BofA BBB US Corporate Index의 옵션조정스프레드(OAS)입니다. BBB는 투자등급 중 가장 낮은 등급(하이일드 바로 위)이라 신용 경계 신호가 빠릅니다. 하이일드(V6)와 같은 ICE BofA 계열이라 FRED 공개 기간 제한(최근 3년)이 적용될 수 있고, 그 경우 표시 기간이 짧아집니다.',
   },
 };

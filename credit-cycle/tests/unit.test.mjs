@@ -15,7 +15,8 @@ import {
 } from '../js/forecast.js';
 import { buildOverlays } from '../js/overlays.js';
 import { parseFredCsv } from '../js/data-loader.js';
-import { VERSIONS, Y_AXES, FREQUENCIES, REQUIRED_KEYS } from '../js/config.js';
+import { VERSIONS, Y_AXES, FREQUENCIES, REQUIRED_KEYS, OPTIONAL_KEYS } from '../js/config.js';
+import { existsSync } from 'node:fs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const dataDir = join(here, '..', 'data');
@@ -248,6 +249,8 @@ test('buildOverlays: 국면 배경은 xSplit·yInversion을 경계로, 전망 �
 function loadMaps(files) {
   const out = {};
   for (const [k, id] of Object.entries(files)) {
+    // 선택 시리즈(BBB 등)는 파일이 아직 없을 수 있다 — 앱과 똑같이 빈 Map으로 취급
+    if (OPTIONAL_KEYS.includes(k) && !existsSync(join(dataDir, `${id}.csv`))) { out[k] = new Map(); continue; }
     out[k] = parseFredCsv(readFileSync(join(dataDir, `${id}.csv`), 'utf8'), `${id}.csv`);
   }
   return out;
@@ -262,6 +265,7 @@ test('실데이터: 모든 빈도·버전·세로축에서 전망이 계산된�
     for (const [vk, v] of Object.entries(VERSIONS)) {
       for (const [yk, y] of Object.entries(Y_AXES)) {
         const own = computePoints(rows, v, y);
+        if (v.needs && !own.length) continue; // 데이터 파일이 아직 없는 선택 지표
         let hist = own;
         if (v.proxy) {
           hist = spliceProxyHistory(own, computePoints(rows, VERSIONS[v.proxy], y),
@@ -287,4 +291,28 @@ test('실데이터: 주간 빈도는 일간과 같은 최신일로 끝난다', (
   const weekly = aggregateWeeklyMean(daily);
   assert.equal(weekly[weekly.length - 1].date, daily[daily.length - 1].date);
   assert.ok(weekly.length > daily.length / 6 && weekly.length < daily.length / 4);
+});
+
+test('V7(BBB): 값이 없으면 null, 있으면 X로 쓰고, 선택 시리즈가 빠져도 다른 버전은 그대로', () => {
+  assert.equal(VERSIONS.V7.compute({ BBB: null }), null);
+  assert.equal(VERSIONS.V7.compute({}), null);
+  assert.equal(VERSIONS.V7.compute({ BBB: 1.7 }), 1.7);
+  assert.ok(OPTIONAL_KEYS.includes(VERSIONS.V7.needs));
+  const maps = {
+    GS10: new Map([['2000-01-01', 6]]), GS2: new Map([['2000-01-01', 5]]),
+    BAA: new Map([['2000-01-01', 8]]), BBB: new Map(),
+  };
+  const rows = alignSeries(maps, REQUIRED_KEYS);
+  assert.equal(rows.length, 1);
+  assert.equal(computePoints(rows, VERSIONS.V7, Y_AXES.ratio).length, 0);
+  assert.equal(computePoints(rows, VERSIONS.V2, Y_AXES.ratio).length, 1);
+});
+
+test('aggregateWeeklyMean / aggregateAnnualMean: BBB 키도 집계된다', () => {
+  const rows = [
+    { date: '2026-09-21', GS10: 4, GS2: 3, BBB: 1.0 },
+    { date: '2026-09-22', GS10: 5, GS2: 3, BBB: 2.0 },
+  ];
+  assert.equal(aggregateWeeklyMean(rows, ['GS10', 'GS2', 'BBB'])[0].BBB, 1.5);
+  assert.equal(aggregateAnnualMean(rows, ['GS10', 'GS2', 'BBB'])[0].BBB, 1.5);
 });

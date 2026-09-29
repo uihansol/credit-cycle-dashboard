@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>미국 금리·신용 사이클 탐색기</title>
-  <meta name="description" content="Baa 회사채 스프레드와 10년/2년 국채금리 비율로 본 미국 금리·신용 사이클 궤적">
+  <meta name="description" content="장단기 금리차와 신용·하이일드 스프레드의 궤적으로 본 미국 거시 사이클 — 현재 국면 진단과 과거 유사 국면 기반 전망">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔄</text></svg>">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
   <link rel="stylesheet" href="./css/style.css">
@@ -15,100 +15,149 @@
 <body>
   <main class="page">
     <header class="masthead">
-      <h1>미국 금리·신용 사이클 탐색기</h1>
-      <p class="masthead__sub">
-        <span>V2: Baa−10Y × 10Y/2Y</span>
-        <span class="masthead__sep" aria-hidden="true">|</span>
-        <span>V4: Baa/Aaa × 10Y/2Y</span>
-        <span class="masthead__sep" aria-hidden="true">|</span>
-        <span>V6: 하이일드 OAS × 10Y/2Y</span>
-      </p>
-    </header>
-
-    <section class="panel controls" aria-label="분석 조건">
-      <label class="field">
-        <span class="field__label">버전</span>
-        <select id="version"></select>
-      </label>
-      <label class="field field--narrow">
-        <span class="field__label">자료 빈도</span>
-        <select id="freq"></select>
-      </label>
-      <label class="field">
-        <span class="field__label">시작일</span>
-        <input type="date" id="start">
-      </label>
-      <label class="field">
-        <span class="field__label">종료일</span>
-        <input type="date" id="end">
-      </label>
-      <label class="field field--range">
-        <span class="field__label">궤적 점 크기 <output id="marker-size-out">7</output></span>
-        <input type="range" id="marker-size" min="3" max="18" step="1" value="7">
-      </label>
-      <div class="field field--action">
-        <button type="button" id="reload" class="button">데이터 불러오기</button>
+      <div class="masthead__text">
+        <p class="eyebrow">US MACRO · CREDIT CYCLE</p>
+        <h1>미국 금리·신용 사이클 탐색기</h1>
+        <p class="masthead__lede">
+          장단기 금리차(커브)와 신용·하이일드 스프레드가 함께 그리는 궤적으로
+          거시 환경이 <strong>지금 어디에 있고</strong>, 과거 비슷한 국면에서는 <strong>어디로 움직였는지</strong> 봅니다.
+        </p>
+      </div>
+      <div class="masthead__meta">
+        <span id="data-fresh" class="pill">데이터 확인 중…</span>
+        <button type="button" id="reload" class="button button--ghost">데이터 새로 읽기</button>
         <span id="status" class="status" role="status" aria-live="polite"></span>
       </div>
-      <p id="version-note" class="version-note" hidden></p>
+    </header>
 
-      <div class="field field--full range-row">
-        <span class="field__label">빠른 기간 선택</span>
-        <div id="range-buttons" class="chip-row"></div>
+    <section class="panel toolbar" aria-label="분석 조건">
+      <div class="toolbar__group">
+        <span class="field__label" id="lbl-version">신용 지표 · 가로축</span>
+        <div id="version-seg" class="seg" role="radiogroup" aria-labelledby="lbl-version"></div>
+      </div>
+      <div class="toolbar__group">
+        <span class="field__label" id="lbl-yaxis">금리 구조 · 세로축</span>
+        <div id="yaxis-seg" class="seg" role="radiogroup" aria-labelledby="lbl-yaxis"></div>
+      </div>
+      <div class="toolbar__group">
+        <span class="field__label" id="lbl-freq">자료 빈도</span>
+        <div id="freq-seg" class="seg" role="radiogroup" aria-labelledby="lbl-freq"></div>
+      </div>
+      <div class="toolbar__group toolbar__group--period">
+        <span class="field__label">기간</span>
+        <div class="period">
+          <div id="range-buttons" class="chip-row" role="group" aria-label="빠른 기간 선택"></div>
+          <div class="period__dates">
+            <label class="sr-only" for="start">시작일</label>
+            <input type="date" id="start" aria-label="시작일">
+            <span class="period__sep" aria-hidden="true">~</span>
+            <label class="sr-only" for="end">종료일</label>
+            <input type="date" id="end" aria-label="종료일 (기준 시점)">
+          </div>
+        </div>
       </div>
 
-      <div class="field field--full display-options">
-        <span class="field__label">표시 옵션</span>
-        <div class="option-row">
-          <label class="option"><input type="checkbox" id="opt-recession"> 경기침체 음영 (NBER)</label>
+      <details class="toolbar__more">
+        <summary>표시 옵션</summary>
+        <div class="option-grid">
           <label class="option"><input type="checkbox" id="opt-phases"> 4단계 국면 배경</label>
+          <label class="option"><input type="checkbox" id="opt-recent"> 최근 흐름 강조</label>
+          <label class="option"><input type="checkbox" id="opt-arrows"> 흐름 화살표</label>
           <label class="option"><input type="checkbox" id="opt-events"> 주요 시기 표시</label>
+          <label class="option"><input type="checkbox" id="opt-recession"> 경기침체 음영 (NBER)</label>
           <label class="option option--select">
-            궤적 색상 기준
+            궤적 색상
             <select id="color-mode">
               <option value="time">시간(연도)</option>
               <option value="speed">이동 속도</option>
             </select>
           </label>
+          <label class="option option--range">
+            점 크기 <output id="marker-size-out">7</output>
+            <input type="range" id="marker-size" min="3" max="18" step="1" value="7">
+          </label>
         </div>
-      </div>
+      </details>
+      <p id="version-note" class="version-note" hidden></p>
     </section>
 
     <div id="notice" class="notice" role="alert" hidden></div>
 
-    <article class="panel chart-panel chart-panel--hero">
-      <header class="chart-panel__head">
-        <h2>금리·신용 사이클 궤적</h2>
-        <p id="trajectory-sub" class="chart-panel__sub"></p>
-      </header>
-      <div id="chart-trajectory" class="chart chart--large"></div>
-      <p class="chart-panel__note">
-        점 색이 진할수록 최근 시점입니다 (오른쪽 색상 막대에 연도 또는 이동 속도 표시).
-        굵은 테두리만 있는 점은 각 연도의 시작 지점, <span class="legend-dot legend-dot--current"></span>빨간 점은 가장 최근 값입니다.
-        점선은 장단기금리차 역전 기준선(10Y=2Y)입니다. 국면 배경·주요 시기 표시는 위 "표시 옵션"에서 켤 수 있습니다.
-        드래그로 확대, 더블클릭으로 원래 크기로 돌아갑니다.
-      </p>
-    </article>
+    <!-- 현재 거시 환경 진단 -->
+    <section id="diagnosis" class="diagnosis" aria-label="현재 거시 환경 진단" aria-live="polite"></section>
+
+    <section class="workspace">
+      <article class="panel chart-panel chart-panel--hero">
+        <header class="chart-panel__head chart-panel__head--row">
+          <div>
+            <h2>금리·신용 사이클 궤적</h2>
+            <p id="trajectory-sub" class="chart-panel__sub"></p>
+          </div>
+          <div class="chart-actions">
+            <button type="button" id="zoom-current" class="button button--small button--ghost" aria-pressed="false" title="최근 3년 궤적과 전망 경로만 크게 봅니다">⌖ 현재 부근 확대</button>
+            <button type="button" id="play" class="button button--small" aria-pressed="false">▶ 흐름 재생</button>
+          </div>
+        </header>
+        <div id="chart-trajectory" class="chart chart--large"></div>
+        <p class="chart-panel__note">
+          점은 과거(연함) → 최근(진함) 순서로 이어지며 <span class="legend-dot legend-dot--current"></span>빨간 점이 현재 위치입니다.
+          오른쪽으로 갈수록 신용스프레드가 넓고(신용 경계), 위로 갈수록 장단기 금리차가 큽니다(커브 가파름). 점선은 장단기 역전선입니다.
+          <span class="legend-dot legend-dot--forecast"></span>보라색 점선이 과거 유사 국면으로 본 예상 경로입니다. 드래그로 확대, 더블클릭으로 원래대로.
+        </p>
+      </article>
+
+      <aside class="panel forecast-panel" aria-labelledby="forecast-title">
+        <header class="forecast-panel__head">
+          <h2 id="forecast-title">앞으로의 경로</h2>
+          <label class="switch">
+            <input type="checkbox" id="opt-forecast">
+            <span>전망 표시</span>
+          </label>
+        </header>
+        <div class="forecast-panel__horizon">
+          <span class="field__label" id="lbl-horizon">전망 기간</span>
+          <div id="horizon-seg" class="seg seg--small" role="radiogroup" aria-labelledby="lbl-horizon"></div>
+        </div>
+        <div id="forecast-body" class="forecast-body"></div>
+      </aside>
+    </section>
 
     <section class="grid-2">
       <article class="panel chart-panel">
         <header class="chart-panel__head">
-          <h2>가로축 지표의 시간 변화</h2>
-          <p id="x-chart-sub" class="chart-panel__sub">Baa − 10Y Treasury (%p)</p>
+          <h2>신용 지표의 시간 변화</h2>
+          <p id="x-chart-sub" class="chart-panel__sub"></p>
         </header>
         <div id="chart-x" class="chart chart--small"></div>
       </article>
       <article class="panel chart-panel">
         <header class="chart-panel__head">
-          <h2>세로축 지표의 시간 변화</h2>
-          <p class="chart-panel__sub">10Y / 2Y Treasury yield ratio</p>
+          <h2>금리 구조의 시간 변화</h2>
+          <p id="y-chart-sub" class="chart-panel__sub"></p>
         </header>
         <div id="chart-y" class="chart chart--small"></div>
       </article>
     </section>
-    <p class="grid-2-note">회색 음영은 NBER이 판정한 경기침체 구간입니다 (표시 옵션에서 끌 수 있음).</p>
+    <p class="grid-2-note">
+      회색 음영은 NBER이 판정한 경기침체 구간, 보라색 부채꼴은 전망 범위(진한 부분 25–75%, 연한 부분 10–90%)입니다.
+    </p>
 
-    <section id="cards" class="stats" aria-label="현재 지표"></section>
+    <details class="panel method">
+      <summary>전망은 어떻게 계산하나요?</summary>
+      <div class="method__body">
+        <ol>
+          <li><strong>유사 시점 찾기</strong> — 전체 이력에서 현재와 <em>위치(가로·세로 값)</em>와 <em>최근 6개월 흐름(방향·속도)</em>이 가장 비슷한 과거 시점을 찾습니다. 같은 사건이 여러 번 뽑히지 않도록 서로 12개월 이상 떨어진 시점만 고릅니다.</li>
+          <li><strong>경로 옮겨 붙이기</strong> — 각 유사 시점 이후 실제로 움직인 궤적을 현재 위치에 옮겨 붙입니다 (비율 지표·하이일드 스프레드는 변화율로 적용).</li>
+          <li><strong>평균·범위·가능성</strong> — 가까운 시점일수록 큰 가중치로 평균해 예상 경로를 만들고, 경로들이 흩어진 정도로 범위를, 끝점이 속한 4분면으로 국면별 가능성을 셉니다.</li>
+          <li><strong>침체 동반 비율</strong> — 그 유사 시점들 이후 전망 기간 안에 NBER 경기침체가 있었던 비율을, 평소(전체 이력) 비율과 함께 보여 줍니다.</li>
+        </ol>
+        <p>
+          계산에는 기준 시점 이전에 알 수 있던 정보만 씁니다. 종료일을 과거(예: 2007년, 2019년)로 옮기면 그 시점에서 이 방법이 무엇을 가리켰는지 되짚어 볼 수 있습니다.
+          하이일드(V6)는 FRED 공개 기간이 짧아서, 겹치는 기간의 관계로 Baa−10Y 장기 이력을 하이일드 척도로 환산해 과거 유사 시점을 찾습니다.
+        </p>
+        <p class="method__warn">통계적 예측 모형이 아니라 “역사가 비슷하게 흘러간다면”이라는 참고용 시나리오입니다. 투자 판단의 근거로 쓰지 마세요.</p>
+      </div>
+    </details>
 
     <footer class="footer">
       <p id="data-meta">데이터 출처: FRED (저장소에 보관된 CSV)</p>

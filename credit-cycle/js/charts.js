@@ -8,17 +8,19 @@ const GL_THRESHOLD = 4000; // 점이 많으면 WebGL(scattergl) 사용
 const COLORS = {
   ink: '#1f2a37',
   muted: '#6b7785',
-  grid: '#e7ebf0',
-  xSeries: '#2c5f8a',
-  ySeries: '#8a5a2c',
-  path: 'rgba(60, 72, 88, 0.35)',
+  grid: '#e9edf2',
+  xSeries: '#b0342f',   // 신용스프레드 — 붉은 계열 (스트레스)
+  ySeries: '#256abf',   // 장단기 금리 구조 — 푸른 계열
+  path: 'rgba(60, 72, 88, 0.30)',
+  forecast: '#6a3fb5',
 };
 
-// 과거(연함) → 최근(진함)
+// 과거(연함) → 최근(진함) — 단일 색상(파랑) 순차 팔레트
 const TIME_SCALE = [
-  [0, '#d6e4f0'],
-  [0.5, '#6f9ec4'],
-  [1, '#12375c'],
+  [0, '#cde2fb'],
+  [0.35, '#86b6ef'],
+  [0.7, '#2a78d6'],
+  [1, '#0d366b'],
 ];
 
 const CURRENT_COLOR = '#c0392b';
@@ -140,6 +142,7 @@ const config = () => ({ ...BASE_CONFIG, displayModeBar: isMobile() ? false : 'ho
  */
 export function renderTimeSeries(el, points, opts) {
   const mobile = isMobile();
+  const traces = [];
   const trace = {
     type: points.length > GL_THRESHOLD ? 'scattergl' : 'scatter',
     mode: 'lines',
@@ -148,13 +151,48 @@ export function renderTimeSeries(el, points, opts) {
     customdata: points.map((p) => formatDateLabel(p.date, opts.freq)),
     line: { color: opts.color || COLORS.xSeries, width: 1.6 },
     hovertemplate: `%{customdata}<br>${opts.label}: %{y:.${opts.digits}f}<extra></extra>`,
+    name: opts.label,
+    showlegend: false,
   };
+  traces.push(trace);
+
+  // 전망 부채꼴(fan): 10–90% 밴드, 25–75% 밴드, 예상 경로(점선)
+  const fc = opts.forecast;
+  const shapes = recessionShapes(opts.recessions);
+  if (fc && fc.dates.length > 1) {
+    const band = (lo, hi, fill, name) => [
+      { type: 'scatter', mode: 'lines', x: fc.dates, y: lo, line: { width: 0 }, hoverinfo: 'skip', showlegend: false },
+      { type: 'scatter', mode: 'lines', x: fc.dates, y: hi, line: { width: 0 }, fill: 'tonexty', fillcolor: fill, name, hoverinfo: 'skip', showlegend: false },
+    ];
+    traces.push(...band(fc.q10, fc.q90, 'rgba(106, 63, 181, 0.10)', '10–90%'));
+    traces.push(...band(fc.q25, fc.q75, 'rgba(106, 63, 181, 0.18)', '25–75%'));
+    traces.push({
+      type: 'scatter', mode: 'lines', x: fc.dates, y: fc.mean,
+      line: { color: COLORS.forecast, width: 2, dash: 'dash' },
+      customdata: fc.labels,
+      hovertemplate: `예상 %{customdata}<br>${opts.label}: %{y:.${opts.digits}f}<extra></extra>`,
+      showlegend: false,
+    });
+    // 전망 시작 지점 세로선
+    shapes.push({
+      type: 'line', xref: 'x', yref: 'paper', x0: fc.dates[0], x1: fc.dates[0], y0: 0, y1: 1,
+      line: { color: 'rgba(106, 63, 181, 0.5)', width: 1, dash: 'dot' },
+    });
+  }
+  if (Number.isFinite(opts.refLine)) {
+    shapes.push({
+      type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'y', y0: opts.refLine, y1: opts.refLine,
+      line: { color: REF_LINE_COLOR, width: 1, dash: 'dash' },
+    });
+  }
+
   const layout = baseLayout(mobile);
   layout.xaxis = { ...layout.xaxis, type: 'date' };
+  if (opts.xRange) layout.xaxis.range = opts.xRange;
   layout.yaxis = { ...layout.yaxis, title: { text: mobile ? '' : opts.label, font: { size: 11, color: COLORS.muted } } };
   layout.hovermode = 'x';
-  layout.shapes = recessionShapes(opts.recessions);
-  return Plotly.react(el, [trace], layout, config());
+  layout.shapes = shapes;
+  return Plotly.react(el, traces, layout, config());
 }
 
 /**
@@ -182,7 +220,11 @@ export function renderTrajectory(el, points, opts, overlays = {}) {
   const yearMarks = pickYearMarks(points);
   // 연도 라벨 지점: 점을 살짝 키우고 진한 테두리를 둘러 궤적 점들과 구분한다.
   const yearDots = {
-    type: 'scatter', mode: 'markers', x: yearMarks.map((m) => xs[m.index]), y: yearMarks.map((m) => ys[m.index]),
+    type: 'scatter', mode: mobile ? 'markers' : 'markers+text',
+    x: yearMarks.map((m) => xs[m.index]), y: yearMarks.map((m) => ys[m.index]),
+    text: yearMarks.map((m) => `'${m.year.slice(2)}`),
+    textposition: 'top right',
+    textfont: { size: 10, color: '#52606d' },
     marker: { size: Math.max(opts.markerSize + 3, 9), color: 'rgba(0,0,0,0)', line: { width: 1.6, color: COLORS.ink } },
     hoverinfo: 'skip',
     showlegend: false,
@@ -200,53 +242,68 @@ export function renderTrajectory(el, points, opts, overlays = {}) {
 
   // 가장 최근 시점: 큰 점으로 강조해 "지금 위치"를 바로 찾을 수 있게 한다.
   const current = {
-    type: 'scatter', mode: 'markers', x: [xs[n - 1]], y: [ys[n - 1]],
+    type: 'scatter', x: [xs[n - 1]], y: [ys[n - 1]],
     customdata: [labels[n - 1]],
-    marker: { size: Math.max(opts.markerSize + 7, 14), color: CURRENT_COLOR, line: { width: 2, color: '#ffffff' }, symbol: 'circle' },
+    mode: 'markers+text',
+    text: [mobile ? '' : `<b>${opts.currentLabel || '현재'}</b>`],
+    textposition: 'top left',
+    textfont: { size: 11, color: CURRENT_COLOR },
+    marker: { size: Math.max(opts.markerSize + 7, 14), color: CURRENT_COLOR, line: { width: 2.5, color: '#ffffff' }, symbol: 'circle' },
     hovertemplate: `현재 (%{customdata})<br>X: %{x:.${opts.xDigits}f}<br>Y: %{y:.${opts.yDigits}f}<extra></extra>`,
     showlegend: false,
   };
 
   const layout = baseLayout(mobile);
-  layout.margin = { ...layout.margin, r: mobile ? 16 : 24, b: 52, l: mobile ? 48 : 64 };
-  layout.xaxis = { ...layout.xaxis, title: { text: opts.xLabel, font: { size: 12, color: COLORS.muted } } };
-  layout.yaxis = { ...layout.yaxis, title: { text: opts.yLabel, font: { size: 12, color: COLORS.muted } } };
+  layout.margin = { ...layout.margin, r: mobile ? 12 : 24, b: 52, l: mobile ? 48 : 64 };
+  const axisTitle = (text, hint) => ({
+    text: mobile ? text : `${text}  <span style="font-size:10px">${hint}</span>`,
+    font: { size: 12, color: COLORS.muted },
+  });
+  layout.xaxis = { ...layout.xaxis, title: axisTitle(opts.xLabel, '→ 스프레드 확대 · 신용 경계') };
+  layout.yaxis = { ...layout.yaxis, title: axisTitle(opts.yLabel, '↑ 커브 가팔라짐') };
+  if (opts.xRange) layout.xaxis.range = opts.xRange;
+  if (opts.yRange) layout.yaxis.range = opts.yRange;
   layout.hovermode = 'closest';
 
-  // 장단기금리차 역전 기준선 (Y = 10Y/2Y = 1, 즉 10Y=2Y). Y축이 항상 이 값을 포함하지 않을 수 있어 존재할 때만 그린다.
-  const yVals = ys;
-  const yMin = Math.min(...yVals), yMax = Math.max(...yVals);
-  const refLine = yMin < 1 && yMax > 0.9
+  // 장단기 역전 기준선 (비율이면 Y=1, 금리차면 Y=0). 표시 범위 근처에 있을 때만 그린다.
+  const inv = Number.isFinite(opts.yInversion) ? opts.yInversion : 1;
+  const extentY = ys.concat(overlays.extentY || []);
+  const yMin = Math.min(...extentY), yMax = Math.max(...extentY);
+  const pad = (yMax - yMin) * 0.1;
+  const showRef = inv >= yMin - pad && inv <= yMax + pad;
+  const refLine = showRef
     ? [{
-      type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'y', y0: 1, y1: 1,
-      line: { color: REF_LINE_COLOR, width: 1, dash: 'dash' },
+      type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'y', y0: inv, y1: inv,
+      line: { color: REF_LINE_COLOR, width: 1.2, dash: 'dash' },
     }]
     : [];
-  const refAnnotation = refLine.length
+  const refAnnotation = showRef
     ? [{
-      xref: 'paper', x: 1, xanchor: 'right', yref: 'y', y: 1, yanchor: 'bottom',
-      text: '10Y = 2Y (장단기 역전선)', showarrow: false,
-      font: { size: 10, color: REF_LINE_COLOR }, bgcolor: 'rgba(255,255,255,0.7)',
+      xref: 'paper', x: 0.5, xanchor: 'center', yref: 'y', y: inv, yanchor: 'bottom',
+      text: '10Y = 2Y 장단기 역전선', showarrow: false,
+      font: { size: 10, color: '#7b8794' }, bgcolor: 'rgba(255,255,255,0.7)',
     }]
     : [];
 
   layout.shapes = [...refLine, ...(overlays.shapes || [])];
   layout.annotations = [...refAnnotation, ...(overlays.annotations || [])];
 
-  // 이벤트 강조선처럼 이름이 있는 오버레이 trace가 있으면 범례를 켠다.
-  const hasNamedOverlay = (overlays.traces || []).some((t) => t.name);
+  // 이름이 있는 오버레이 trace(이벤트·전망 등)가 있으면 그래프 아래에 범례를 켠다.
+  const hasNamedOverlay = (overlays.traces || []).some((t) => t.name && t.showlegend !== false);
   if (hasNamedOverlay) {
     layout.showlegend = true;
     layout.legend = {
-      orientation: 'h', x: 0, y: 1.02, yanchor: 'bottom', xanchor: 'left',
-      font: { size: 10, color: COLORS.muted }, bgcolor: 'rgba(255,255,255,0)',
+      orientation: 'h', x: 0, y: -0.14, yanchor: 'top', xanchor: 'left',
+      font: { size: 11, color: COLORS.muted }, bgcolor: 'rgba(255,255,255,0)',
     };
+    layout.margin = { ...layout.margin, b: mobile ? 110 : 84 };
   }
 
-  return Plotly.react(el, [path, yearDots, dots, current, ...(overlays.traces || [])], layout, config());
+  // trace 순서: 0 선, 1 연도표식, 2 궤적점, 3.. 오버레이, 마지막 = 현재점 (항상 맨 위)
+  return Plotly.react(el, [path, yearDots, dots, ...(overlays.traces || []), current], layout, config());
 }
 
-/** 궤적 점 크기만 바꾼다 (전체 재렌더링 없이). trace 순서: 0 선, 1 연도표식, 2 궤적점, 3 현재점 */
+/** 궤적 점 크기만 바꾼다 (전체 재렌더링 없이). trace 순서: 0 선, 1 연도표식, 2 궤적점 */
 export function setTrajectoryMarkerSize(el, size) {
   if (el && el.data) Plotly.restyle(el, { 'marker.size': size }, [2]);
 }

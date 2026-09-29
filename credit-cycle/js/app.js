@@ -2,14 +2,18 @@
 // app.js — 상태 관리 + UI 연결 (진입점)
 // ============================================================
 import {
-  FREQUENCIES, VERSIONS, Y_AXIS, REQUIRED_KEYS, RECESSION_FILE,
-  DEFAULT_FREQ, DEFAULT_VERSION, DEFAULT_MARKER_SIZE,
+  FREQUENCIES, VERSIONS, Y_AXES, REQUIRED_KEYS, RECESSION_FILE, FORECAST,
+  DEFAULT_FREQ, DEFAULT_VERSION, DEFAULT_MARKER_SIZE, DEFAULT_Y_AXIS,
 } from './config.js';
 import { loadSeries, loadMeta, DataLoadError } from './data-loader.js';
 import {
-  alignSeries, aggregateAnnualMean, filterByDate, computePoints,
-  formatDateLabel, summarize, computeRecessionPeriods, computeSpeeds, toAxisDate,
+  alignSeries, aggregateAnnualMean, aggregateWeeklyMean, filterByDate, computePoints,
+  formatDateLabel, computeRecessionPeriods, computeSpeeds, toAxisDate, addSteps, median,
 } from './transform.js';
+import {
+  PHASES, PHASE_ORDER, stepsFor, spliceProxyHistory, findAnalogs, projectFromAnalogs,
+  summarizeProjection, diagnose, recessionWithin,
+} from './forecast.js';
 import {
   renderTimeSeries, renderTrajectory, setTrajectoryMarkerSize, clearChart, COLORS,
 } from './charts.js';
@@ -18,34 +22,42 @@ import { buildOverlays } from './overlays.js';
 // ------------------------------------------------------------ 상태
 const state = {
   version: DEFAULT_VERSION,
+  yAxis: DEFAULT_Y_AXIS,   // 'ratio' | 'spread'
   freq: DEFAULT_FREQ,
   start: FREQUENCIES[DEFAULT_FREQ].minDate,
   end: '',
   endAuto: true,          // 사용자가 종료일을 직접 바꾸기 전까지 최신일을 따라감
+  rangeYears: null,       // 눌린 빠른 기간 버튼 (null=전체, 'custom'=직접 입력)
   markerSize: DEFAULT_MARKER_SIZE,
   colorMode: 'time',       // 'time' | 'speed' — 궤적 점 색상 기준
+  horizon: FORECAST.defaultHorizon, // 전망 기간(개월)
+  highlightAnalog: null,   // 강조할 유사 시점 날짜
+  zoomCurrent: false,      // 궤적을 최근 3년 + 전망 경로 범위로 확대
   rows: {},                // freq → 정렬된 원자료 행
   latest: {},              // freq → 마지막 관측 날짜 (YYYY-MM-DD)
   recessionPeriods: null,  // USREC에서 뽑은 [{start,end}] (빈도와 무관, 한 번만 로드)
-  features: { recession: true, phases: false, events: false }, // 표시 옵션 on/off
+  features: { recession: true, phases: true, events: false, arrows: false, recent: true, forecast: true },
 };
 
 const RANGE_BUTTONS = [
   { label: '1년', years: 1 }, { label: '3년', years: 3 }, { label: '5년', years: 5 },
-  { label: '10년', years: 10 }, { label: '전체', years: null },
+  { label: '10년', years: 10 }, { label: '20년', years: 20 }, { label: '전체', years: null },
 ];
 
 // ------------------------------------------------------------ DOM
 const $ = (id) => document.getElementById(id);
 const el = {
-  version: $('version'), freq: $('freq'), start: $('start'), end: $('end'),
-  size: $('marker-size'), sizeOut: $('marker-size-out'), reload: $('reload'),
+  versionSeg: $('version-seg'), yAxisSeg: $('yaxis-seg'), freqSeg: $('freq-seg'), horizonSeg: $('horizon-seg'),
+  start: $('start'), end: $('end'),
+  size: $('marker-size'), sizeOut: $('marker-size-out'), reload: $('reload'), play: $('play'), zoom: $('zoom-current'),
   notice: $('notice'), status: $('status'), versionNote: $('version-note'),
-  xTitle: $('x-chart-sub'), chartX: $('chart-x'), chartY: $('chart-y'),
+  xTitle: $('x-chart-sub'), yTitle: $('y-chart-sub'), chartX: $('chart-x'), chartY: $('chart-y'),
   chartTraj: $('chart-trajectory'), trajSub: $('trajectory-sub'),
-  cards: $('cards'), meta: $('data-meta'), rangeButtons: $('range-buttons'),
-  optRecession: $('opt-recession'), optPhases: $('opt-phases'),
-  optEvents: $('opt-events'), colorMode: $('color-mode'),
+  diagnosis: $('diagnosis'), forecastBody: $('forecast-body'),
+  meta: $('data-meta'), fresh: $('data-fresh'), rangeButtons: $('range-buttons'),
+  optRecession: $('opt-recession'), optPhases: $('opt-phases'), optEvents: $('opt-events'),
+  optArrows: $('opt-arrows'), optRecent: $('opt-recent'), optForecast: $('opt-forecast'),
+  colorMode: $('color-mode'),
 };
 
 // ------------------------------------------------------------ 알림
@@ -69,6 +81,16 @@ function showLoadError(err) {
 }
 const escapeHtml = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
+// ------------------------------------------------------------ 숫자 표시
+const fmt = (v, d) => (Number.isFinite(v) ? v.toFixed(d) : '—');
+const signed = (v, d) => {
+  if (!Number.isFinite(v)) return '—';
+  const r = Number(v.toFixed(d));
+  return `${r > 0 ? '+' : r < 0 ? '−' : '±'}${Math.abs(r).toFixed(d)}`;
+};
+const pct = (p) => (Number.isFinite(p) ? `${Math.round(p * 100)}%` : '—');
+const horizonLabel = (months) => (months % 12 === 0 ? `${months / 12}년` : `${months}개월`);
+
 // ------------------------------------------------------------ 데이터
 async function ensureRows(freq, { refresh = false } = {}) {
   if (!refresh && state.rows[freq]) return state.rows[freq];
@@ -77,7 +99,9 @@ async function ensureRows(freq, { refresh = false } = {}) {
   let rows = alignSeries(maps, REQUIRED_KEYS).filter((r) => r.date >= cfg.minDate);
   state.latest[freq] = rows.length ? rows[rows.length - 1].date : '';
   if (cfg.aggregate === 'annualMean') rows = aggregateAnnualMean(rows);
+  if (cfg.aggregate === 'weeklyMean') rows = aggregateWeeklyMean(rows);
   state.rows[freq] = rows;
+  analysisCache.clear();
   return rows;
 }
 
@@ -95,6 +119,69 @@ async function ensureRecessionPeriods({ refresh = false } = {}) {
   return state.recessionPeriods;
 }
 
+// ------------------------------------------------------------ 분석용 이력 (기간 필터와 무관한 전체 이력)
+const analysisCache = new Map();
+
+/**
+ * 선택한 버전·세로축·빈도의 전체 이력. 버전에 proxy가 있고 자체 이력이 15년 미만이면
+ * proxy 버전의 장기 이력을 환산해 앞에 붙인다 (전망·백분위 계산용, 그래프에는 실제 값만 표시).
+ */
+function analysisHistory() {
+  const key = `${state.version}|${state.yAxis}|${state.freq}`;
+  if (analysisCache.has(key)) return analysisCache.get(key);
+  const v = VERSIONS[state.version];
+  const y = Y_AXES[state.yAxis];
+  const fcfg = FREQUENCIES[state.freq];
+  const rows = state.rows[state.freq] || [];
+  const own = computePoints(rows, v, y);
+  let points = own, fit = null;
+  const spanYears = own.length ? (Date.parse(toAxisDate(own[own.length - 1].date)) - Date.parse(toAxisDate(own[0].date))) / 3.156e10 : 0;
+  if (v.proxy && VERSIONS[v.proxy] && spanYears < 15) {
+    const proxy = computePoints(rows, VERSIONS[v.proxy], y);
+    const res = spliceProxyHistory(own, proxy, { mode: v.deltaMode, minOverlap: Math.max(3, stepsFor(fcfg, 12)) });
+    points = res.points; fit = res.fit;
+  }
+  const out = { points, fit, xSplit: median(points.map((p) => p.x)), ownStart: own[0]?.date };
+  analysisCache.set(key, out);
+  return out;
+}
+
+/** 날짜 이하 마지막 인덱스 (이진 탐색) */
+function indexAtOrBefore(points, date) {
+  let lo = 0, hi = points.length - 1, ans = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (points[mid].date <= date) { ans = mid; lo = mid + 1; } else hi = mid - 1;
+  }
+  return ans;
+}
+
+function horizonsFor(freq) {
+  return freq === 'annual' ? [12, 24, 36] : FORECAST.horizons;
+}
+
+/** 현재 기준 시점(표시 구간의 마지막 점)에서 유사 국면 전망을 계산한다. */
+function computeForecast(hist, currentDate) {
+  const v = VERSIONS[state.version];
+  const y = Y_AXES[state.yAxis];
+  const fcfg = FREQUENCIES[state.freq];
+  const ci = indexAtOrBefore(hist.points, currentDate);
+  if (ci < 0) return { ci, analogs: [], proj: null, summary: null };
+  const H = stepsFor(fcfg, state.horizon);
+  const L = stepsFor(fcfg, FORECAST.lookbackMonths);
+  const analogs = findAnalogs(hist.points, ci, {
+    horizon: H, lookback: L, separation: stepsFor(fcfg, FORECAST.separationMonths),
+    count: FORECAST.analogs, momentumWeight: FORECAST.momentumWeight,
+    modeX: v.deltaMode, modeY: y.deltaMode,
+  });
+  const proj = projectFromAnalogs(hist.points, ci, analogs, { horizon: H, modeX: v.deltaMode, modeY: y.deltaMode });
+  const summary = summarizeProjection(proj, {
+    xSplit: hist.xSplit, yInversion: y.inversion, periods: state.recessionPeriods || [],
+    horizonMonths: state.horizon, history: hist.points, currentIndex: ci, horizonSteps: H,
+  });
+  return { ci, H, L, analogs, proj, summary };
+}
+
 // ------------------------------------------------------------ 날짜 규칙
 /** @returns {boolean} 렌더링 가능 여부 */
 function applyDateRules() {
@@ -105,16 +192,20 @@ function applyDateRules() {
   if (latest) { el.start.max = latest; el.end.max = latest; }
 
   if (state.endAuto && latest) state.end = latest;
+  if (latest && state.end > latest) state.end = latest;
+  // 빠른 기간 버튼이 눌린 상태면 빈도·종료일이 바뀌어도 그 의미(전체 / 최근 N년)를 유지한다.
+  if (state.rangeYears !== 'custom') state.start = startForRange(state.rangeYears);
 
   const notes = [];
   if (!state.start || state.start < cfg.minDate) {
-    notes.push(state.freq === 'daily'
-      ? '일간 자료는 1986-01-02 이후부터 이용할 수 있습니다. 시작일을 1986-01-02로 조정했습니다.'
-      : `${cfg.label}간 자료는 ${cfg.minDate} 이후부터 이용할 수 있습니다. 시작일을 조정했습니다.`);
+    if (state.start && state.rangeYears === 'custom') {
+      notes.push(`${cfg.label}간 자료는 ${cfg.minDate} 이후부터 이용할 수 있습니다. 시작일을 ${cfg.minDate}로 조정했습니다.`);
+    }
     state.start = cfg.minDate;
   }
   el.start.value = state.start;
   el.end.value = state.end;
+  syncRangeButtons();
 
   if (state.end && state.start > state.end) {
     showNotice('error', '<p>시작일이 종료일보다 늦습니다. 날짜를 다시 선택해 주세요.</p>');
@@ -125,92 +216,361 @@ function applyDateRules() {
   return true;
 }
 
-/** 기간 단축 버튼: 최근 N년 / 전체. latest가 아직 없으면 조용히 무시. */
-function applyQuickRange(years) {
-  const latest = state.latest[state.freq];
+/** 빠른 기간(최근 N년 / 전체)에 해당하는 시작일. 기준은 종료일(없으면 최신일). */
+function startForRange(years) {
   const cfg = FREQUENCIES[state.freq];
-  if (!latest) return;
-  if (years === null) {
-    state.start = cfg.minDate;
-  } else {
-    const [y, m, d] = latest.split('-').map(Number);
-    const start = new Date(Date.UTC(y - years, m - 1, d));
-    const iso = start.toISOString().slice(0, 10);
-    state.start = iso < cfg.minDate ? cfg.minDate : iso;
-  }
-  state.end = latest;
-  state.endAuto = true;
+  const anchor = state.end || state.latest[state.freq];
+  if (years === null || !anchor) return cfg.minDate;
+  const [y, m, d] = anchor.split('-').map(Number);
+  const iso = new Date(Date.UTC(y - years, m - 1, d)).toISOString().slice(0, 10);
+  return iso < cfg.minDate ? cfg.minDate : iso;
+}
+
+/** 기간 단축 버튼: 최근 N년 / 전체. 종료일(기준 시점)은 유지한다. */
+function applyQuickRange(years) {
+  if (!state.latest[state.freq]) return;
+  state.rangeYears = years;
   if (applyDateRules()) render();
+}
+
+function syncRangeButtons() {
+  el.rangeButtons.querySelectorAll('button').forEach((b) => {
+    const y = b.dataset.years === '' ? null : Number(b.dataset.years);
+    b.setAttribute('aria-pressed', String(state.rangeYears === y));
+  });
 }
 
 // ------------------------------------------------------------ 렌더링
 function currentPoints() {
   const rows = filterByDate(state.rows[state.freq] || [], state.start, state.end);
-  return computePoints(rows, VERSIONS[state.version], Y_AXIS);
+  return computePoints(rows, VERSIONS[state.version], Y_AXES[state.yAxis]);
 }
 
 function render() {
+  stopPlay({ silent: true });
   const v = VERSIONS[state.version];
+  const y = Y_AXES[state.yAxis];
+  const fcfg = FREQUENCIES[state.freq];
   const points = currentPoints();
 
   el.xTitle.textContent = v.xLabel;
-  el.trajSub.textContent = `X: ${v.xShort}  ·  Y: ${Y_AXIS.short}  ·  ${FREQUENCIES[state.freq].label}간 자료, 날짜순 연결`;
-  if (v.note) { el.versionNote.textContent = v.note; el.versionNote.hidden = false; }
-  else { el.versionNote.hidden = true; el.versionNote.textContent = ''; }
+  el.yTitle.textContent = y.label;
+  el.trajSub.textContent = `가로 ${v.xShort} × 세로 ${y.short} · ${fcfg.label}간 자료 · 날짜순 연결`;
+  const hist = state.rows[state.freq] ? analysisHistory() : null;
+  const notes = [];
+  if (v.note) notes.push(v.note);
+  if (hist?.fit) {
+    notes.push(`전망·백분위 계산에는 ${formatDateLabel(hist.ownStart, state.freq)} 이전 구간을 ${VERSIONS[v.proxy].xShort} 장기 이력으로 환산해 씁니다 (겹치는 ${hist.fit.n}개 관측치 회귀, R² ${hist.fit.r2.toFixed(2)}${hist.fit.r2 < 0.5 ? ' — 겹치는 기간의 관계가 약해 전망은 방향 참고용으로만 보세요' : ''}).`);
+  }
+  el.versionNote.textContent = notes.join(' ');
+  el.versionNote.hidden = !notes.length;
 
   if (!points.length) {
     [el.chartX, el.chartY, el.chartTraj].forEach(clearChart);
-    renderCards(null);
-    showNotice('info', `<p>선택한 기간에는 ${v.xShort}·${Y_AXIS.short} 지표가 모두 있는 관측치가 없습니다. 기간을 넓혀 보세요.</p>`);
+    el.diagnosis.innerHTML = '';
+    el.forecastBody.innerHTML = '<p class="empty">표시할 관측치가 없습니다.</p>';
+    showNotice('info', `<p>선택한 기간에는 ${v.xShort}·${y.short} 지표가 모두 있는 관측치가 없습니다. 기간을 넓혀 보세요.</p>`);
     return;
   }
 
+  const last = points[points.length - 1];
+  const fc = computeForecast(hist, last.date);
+  const diag = fc.ci >= 0 ? diagnose(hist.points, fc.ci, {
+    xSplit: hist.xSplit, yInversion: y.inversion, stepsPerMonth: fcfg.stepsPerMonth,
+  }) : null;
+
+  // --- 시계열 (전망 부채꼴 포함)
   const recessions = state.features.recession ? (state.recessionPeriods || []) : [];
   const visibleRecessions = recessions
     .map((p) => ({ start: toAxisDate(p.start), end: toAxisDate(p.end) }))
-    .filter((p) => p.end >= points[0].date && p.start <= points[points.length - 1].date);
+    .filter((p) => p.end >= toAxisDate(points[0].date) && p.start <= toAxisDate(last.date));
+  const showFc = state.features.forecast && fc.proj;
+  const fanDates = showFc ? fc.proj.mean.map((_, s) => toAxisDate(s === 0 ? last.date : addSteps(last.date, state.freq, s))) : [];
+  const fanLabels = showFc ? fc.proj.mean.map((_, s) => formatDateLabel(s === 0 ? last.date : addSteps(last.date, state.freq, s), state.freq)) : [];
+  const fan = (axis) => (showFc ? {
+    dates: fanDates, labels: fanLabels,
+    mean: fc.proj.mean.map((q) => q[axis]),
+    q10: fc.proj.bands.q10[axis], q25: fc.proj.bands.q25[axis],
+    q75: fc.proj.bands.q75[axis], q90: fc.proj.bands.q90[axis],
+  } : null);
 
   renderTimeSeries(el.chartX, points, {
     accessor: (p) => p.x, label: v.xShort, digits: v.digits, freq: state.freq, color: COLORS.xSeries,
-    recessions: visibleRecessions,
+    recessions: visibleRecessions, forecast: fan('x'),
   });
   renderTimeSeries(el.chartY, points, {
-    accessor: (p) => p.y, label: Y_AXIS.short, digits: Y_AXIS.digits, freq: state.freq, color: COLORS.ySeries,
-    recessions: visibleRecessions,
+    accessor: (p) => p.y, label: y.short, digits: y.digits, freq: state.freq, color: COLORS.ySeries,
+    recessions: visibleRecessions, forecast: fan('y'), refLine: y.inversion,
   });
 
+  drawTrajectory(points, { hist, fc });
+  renderDiagnosis(diag, hist, fc);
+  renderForecastPanel(fc, hist, diag);
+  writeHash();
+}
+
+/** 궤적 그래프 (재생 중에는 fixedRange + noForecast로 호출된다) */
+function drawTrajectory(points, { hist, fc, fixedRange = null, noForecast = false }) {
+  const v = VERSIONS[state.version];
+  const y = Y_AXES[state.yAxis];
+  const fcfg = FREQUENCIES[state.freq];
   const speeds = state.colorMode === 'speed' ? computeSpeeds(points) : null;
+  const showProj = state.features.forecast && !noForecast && fc?.proj;
+  const range = fixedRange || (state.zoomCurrent ? zoomRange(points, showProj ? fc.proj : null, fcfg) : null);
   const overlays = buildOverlays(points, {
-    version: state.version, freq: state.freq, features: state.features,
-    xDigits: v.digits, yDigits: Y_AXIS.digits,
+    version: state.version, freq: state.freq,
+    features: { ...state.features, forecast: state.features.forecast && !noForecast },
+    xDigits: v.digits, yDigits: y.digits,
+    xSplit: hist?.xSplit, yInversion: y.inversion,
+    projection: fc?.proj, history: hist?.points, highlightAnalog: state.highlightAnalog,
+    horizonLabel: horizonLabel(state.horizon),
+    recentSteps: stepsFor(fcfg, Math.max(12, FORECAST.lookbackMonths)),
+    recentLabel: state.freq === 'annual' ? '최근 흐름' : '최근 12개월 흐름',
+    lookbackSteps: fc?.L,
   });
   renderTrajectory(el.chartTraj, points, {
     freq: state.freq, markerSize: state.markerSize,
-    xLabel: v.xLabel, yLabel: Y_AXIS.label, xShort: v.xShort, yShort: Y_AXIS.short,
-    xDigits: v.digits, yDigits: Y_AXIS.digits,
+    xLabel: v.xLabel, yLabel: y.label, xShort: v.xShort, yShort: y.short,
+    xDigits: v.digits, yDigits: y.digits, yInversion: y.inversion,
     colorMode: state.colorMode, speeds,
+    currentLabel: formatDateLabel(points[points.length - 1].date, state.freq),
+    xRange: range?.x, yRange: range?.y,
   }, overlays);
-
-  renderCards(points);
 }
 
-function renderCards(points) {
-  const s = points ? summarize(points) : null;
+/** "현재 부근 확대": 최근 36개월 궤적 + 전망 경로들을 모두 담는 범위 */
+function zoomRange(points, proj, fcfg) {
+  const recent = points.slice(-Math.max(3, stepsFor(fcfg, 36) + 1));
+  const all = recent.concat(proj ? proj.paths.flatMap((p) => p.points) : []);
+  const pad = (arr) => {
+    const lo = Math.min(...arr), hi = Math.max(...arr);
+    const p = (hi - lo) * 0.12 || Math.abs(hi) * 0.05 || 0.1;
+    return [lo - p, hi + p];
+  };
+  return { x: pad(all.map((p) => p.x)), y: pad(all.map((p) => p.y)) };
+}
+
+// ------------------------------------------------------------ 진단 카드
+function deltaSpan(v, digits, { invertColor = false, neutral = false } = {}) {
+  if (!Number.isFinite(v)) return '<span class="delta delta--flat">—</span>';
+  const r = Number(v.toFixed(digits));
+  const dir = r > 0 ? 'up' : r < 0 ? 'down' : 'flat';
+  let cls = `delta--${dir}`;
+  if (neutral && dir !== 'flat') cls = `delta--neutral-${dir}`;
+  else if (invertColor && dir !== 'flat') cls = `delta--${dir === 'up' ? 'down' : 'up'}`;
+  const arrow = dir === 'up' ? '▲' : dir === 'down' ? '▼' : '■';
+  return `<span class="delta ${cls}">${arrow} ${signed(v, digits)}</span>`;
+}
+
+function renderDiagnosis(diag, hist, fc) {
+  if (!diag) { el.diagnosis.innerHTML = ''; return; }
   const v = VERSIONS[state.version];
-  const lastLabel = s
-    ? formatDateLabel(s.last.date, state.freq) +
-      (s.last.raw.months && s.last.raw.months < 12 ? ` (${s.last.raw.months}개월 평균)` : '')
-    : '—';
-  const items = [
-    ['관측치', s ? s.count.toLocaleString('ko-KR') : '—'],
-    [`현재 X · ${v.xShort}`, s ? s.last.x.toFixed(v.digits) : '—'],
-    [`현재 Y · ${Y_AXIS.short}`, s ? s.last.y.toFixed(Y_AXIS.digits) : '—'],
-    ['시작', s ? formatDateLabel(s.first.date, state.freq) : '—'],
-    ['최근', lastLabel],
-  ];
-  el.cards.innerHTML = items
-    .map(([k, val]) => `<div class="stat"><span class="stat__label">${k}</span><span class="stat__value">${val}</span></div>`)
-    .join('');
+  const y = Y_AXES[state.yAxis];
+  const ph = PHASES[diag.phase];
+  const cur = diag.current;
+  const raw = cur.raw || {};
+  const annual = state.freq === 'annual';
+  const asOf = formatDateLabel(cur.date, state.freq) +
+    (raw.months && raw.months < 12 ? ` (${raw.months}개월 평균)` : '') +
+    (raw.days && raw.days < 5 ? ` (${raw.days}일 평균)` : '');
+
+  const changes = (c, digits, opts) => {
+    const parts = [];
+    if (!annual && c.m3) parts.push(`<span class="nowrap">3개월 ${deltaSpan(c.m3, digits, opts)}</span>`);
+    if (c.m12) parts.push(`<span class="nowrap">${annual ? '1년' : '12개월'} ${deltaSpan(c.m12, digits, opts)}</span>`);
+    return parts.join('');
+  };
+  const pick = (k) => ({
+    m3: diag.change.m3 ? diag.change.m3[k] : null,
+    m12: diag.change.m12 ? diag.change.m12[k] : null,
+  });
+
+  const term = Number.isFinite(raw.GS10) && Number.isFinite(raw.GS2) ? raw.GS10 - raw.GS2 : NaN;
+  const ratio = raw.GS2 > 0 ? raw.GS10 / raw.GS2 : NaN;
+  const back12 = fc.ci >= 0 ? hist.points[fc.ci - Math.max(1, Math.round(12 * FREQUENCIES[state.freq].stepsPerMonth))] : null;
+  const r12 = back12?.raw || {};
+  const xPctText = Number.isFinite(diag.xPct)
+    ? `${hist.points[0].date.slice(0, 4)}년 이후 이력 중 백분위 <b>${Math.round(diag.xPct)}</b>${hist.fit ? ' (환산 이력 포함)' : ''}`
+    : '';
+
+  const rec = fc.summary?.recession;
+  const recTile = rec
+    ? `<div class="kpi">
+        <span class="kpi__label">유사 국면 이후 ${horizonLabel(state.horizon)} 내 침체 동반</span>
+        <span class="kpi__value">${pct(rec.probability)}</span>
+        <span class="kpi__sub">평소(전체 이력) ${pct(rec.base)} · 유사 시점 ${fc.analogs.length}개 기준</span>
+        <span class="kpi__deltas">NBER 경기침체 판정 기준, 참고용</span>
+      </div>`
+    : `<div class="kpi"><span class="kpi__label">침체 동반 비율</span><span class="kpi__value">—</span><span class="kpi__sub">유사 시점을 찾을 이력이 부족합니다.</span></div>`;
+
+  el.diagnosis.innerHTML = `
+    <article class="panel phase-card" style="--phase-color:${ph.color}">
+      <div class="phase-card__top">
+        <span class="phase-badge">현재 국면 · ${ph.full}</span>
+        <span class="phase-card__asof">기준 ${asOf}</span>
+      </div>
+      <h3>${diag.flow.title}</h3>
+      <p>${ph.desc}.</p>
+      <div class="phase-card__flow">
+        <strong>최근 ${diag.flow.months >= 12 ? '1년' : `${diag.flow.months}개월`} 흐름</strong>
+        <p>${diag.flow.text}</p>
+      </div>
+      ${diag.signals.length ? `<ul class="signals">${diag.signals.map((s) => `<li class="${s.level}">${s.text}</li>`).join('')}</ul>` : ''}
+    </article>
+    <div class="kpis">
+      <div class="kpi">
+        <span class="kpi__label">신용스프레드 · ${v.xShort}</span>
+        <span class="kpi__value">${fmt(cur.x, v.digits)}<small>${v.unit || ''}</small></span>
+        <span class="kpi__deltas">${changes(pick('x'), v.digits)}</span>
+        <div class="meter" aria-hidden="true"><span class="meter__mark" style="left:${Math.min(100, Math.max(0, diag.xPct || 0))}%"></span></div>
+        <div class="meter__labels"><span>좁음(위험선호)</span><span>넓음(스트레스)</span></div>
+        <span class="kpi__sub">${xPctText}</span>
+      </div>
+      <div class="kpi">
+        <span class="kpi__label">장단기 금리차 · 10Y−2Y</span>
+        <span class="kpi__value">${signed(term, 2)}<small>%p</small></span>
+        <span class="kpi__deltas">${changes(pick('y'), y.digits, { neutral: true })}</span>
+        <span class="kpi__sub">10Y/2Y 비율 ${fmt(ratio, 3)} · ${diag.inverted ? '<b>역전 상태</b>' : '정상 커브'}</span>
+        <span class="kpi__sub">변화는 세로축(${y.short}) 기준 · ▲ 가팔라짐 ▼ 평탄화</span>
+      </div>
+      <div class="kpi">
+        <span class="kpi__label">국채 금리 수준</span>
+        <span class="kpi__value">${fmt(raw.GS2, 2)}<small>% 2Y</small></span>
+        <span class="kpi__sub">10년물 ${fmt(raw.GS10, 2)}%</span>
+        <span class="kpi__deltas"><span class="nowrap">${annual ? '1년' : '12개월'} 2Y ${deltaSpan(raw.GS2 - r12.GS2, 2, { neutral: true })}</span><span class="nowrap">10Y ${deltaSpan(raw.GS10 - r12.GS10, 2, { neutral: true })}</span></span>
+        <span class="kpi__sub">2년물 하락 = 정책금리 인하 기대</span>
+      </div>
+      ${recTile}
+    </div>`;
+}
+
+// ------------------------------------------------------------ 전망 패널
+function renderForecastPanel(fc, hist, diag) {
+  const v = VERSIONS[state.version];
+  const y = Y_AXES[state.yAxis];
+  const hl = horizonLabel(state.horizon);
+  const s = fc.summary;
+  if (!s || !fc.proj) {
+    el.forecastBody.innerHTML = '<p class="empty">기준 시점 이전 이력이 짧아 비슷한 과거 시점을 찾지 못했습니다. 기간 종료일을 늦추거나 다른 버전을 골라 보세요.</p>';
+    return;
+  }
+  const top = PHASE_ORDER.map((k) => [k, s.probs[k]]).sort((a, b) => b[1] - a[1])[0];
+  const cur = fc.proj.current;
+  const headline = `
+    <div class="fc-headline">
+      <p>${hl} 뒤 가장 가능성 높은 국면: <b style="color:${PHASES[top[0]].text}">${PHASES[top[0]].full} (${pct(top[1])})</b></p>
+      <p>예상: ${v.xShort} ${fmt(cur.x, v.digits)} → <b>${fmt(s.expected.x, v.digits)}</b>,
+         ${y.short} ${fmt(cur.y, y.digits)} → <b>${fmt(s.expected.y, y.digits)}</b></p>
+    </div>`;
+
+  const probs = `
+    <section>
+      <h3>${hl} 뒤 국면별 가능성</h3>
+      <ul class="prob-list">
+        ${PHASE_ORDER.map((k) => `
+          <li class="prob${diag && diag.phase === k ? ' is-current' : ''}" style="--c:${PHASES[k].color}">
+            <span class="prob__name"><span class="prob__swatch"></span>${PHASES[k].label}</span>
+            <span class="prob__bar"><span class="prob__fill" style="width:${Math.round(s.probs[k] * 100)}%"></span></span>
+            <span class="prob__val">${pct(s.probs[k])}</span>
+          </li>`).join('')}
+      </ul>
+    </section>`;
+
+  const rec = s.recession;
+  const stats = `
+    <section>
+      <h3>방향 가능성</h3>
+      <div class="fc-stats">
+        <div class="fc-stat"><span class="fc-stat__label">스프레드 확대</span><span class="fc-stat__value">${pct(s.pWiden)}</span><span class="fc-stat__sub">예상 ${signed(s.expected.dx, v.digits)}${v.unit || ''}</span></div>
+        <div class="fc-stat"><span class="fc-stat__label">커브 가팔라짐</span><span class="fc-stat__value">${pct(s.pSteepen)}</span><span class="fc-stat__sub">예상 ${signed(s.expected.dy, y.digits)}</span></div>
+        ${rec ? `<div class="fc-stat"><span class="fc-stat__label">침체 동반</span><span class="fc-stat__value">${pct(rec.probability)}</span><span class="fc-stat__sub">평소 ${pct(rec.base)}</span></div>` : ''}
+        <div class="fc-stat"><span class="fc-stat__label">예상 국면 이동</span><span class="fc-stat__value" style="font-size:0.92rem">${PHASES[s.fromPhase].label} → ${PHASES[s.toPhase].label}</span><span class="fc-stat__sub">평균 경로 끝점 기준</span></div>
+      </div>
+    </section>`;
+
+  const H = fc.proj.horizon;
+  const analogItems = fc.proj.paths
+    .slice()
+    .sort((a, b) => b.weight - a.weight)
+    .map((p) => {
+      const a = p.analog;
+      const h0 = hist.points[a.index], h1 = hist.points[a.index + H];
+      const recHit = (state.recessionPeriods || []).length && recessionWithin(a.date, state.horizon, state.recessionPeriods);
+      const pressed = state.highlightAnalog === a.date;
+      return `<li><button type="button" class="analog" data-date="${a.date}" aria-pressed="${pressed}">
+        <span class="analog__date">${formatDateLabel(a.date, state.freq)}${h0.proxied ? ' <small>(환산)</small>' : ''}</span>
+        <span class="analog__sim">가중치 ${pct(p.weight)}</span>
+        <span class="analog__after">이후 ${hl}: ${v.xShort} ${signed(h1.x - h0.x, v.digits)}, ${y.short} ${signed(h1.y - h0.y, y.digits)}${recHit ? ' · <span class="analog__rec">침체 동반</span>' : ''}</span>
+      </button></li>`;
+    }).join('');
+
+  const since = hist.points[0] ? formatDateLabel(hist.points[0].date, state.freq) : '';
+  el.forecastBody.innerHTML = `
+    ${headline}
+    ${probs}
+    ${stats}
+    <section>
+      <h3>가장 비슷했던 과거 시점 (눌러서 그때 궤적 보기)</h3>
+      <ul class="analogs">${analogItems}</ul>
+    </section>
+    <p class="fc-note">${since}부터의 이력에서 위치·최근 ${FORECAST.lookbackMonths}개월 흐름이 비슷한 시점 ${fc.analogs.length}개를 골라 이후 경로를 현재에 옮겨 붙였습니다. 참고용 시나리오이며 예측을 보장하지 않습니다.</p>`;
+}
+
+// ------------------------------------------------------------ 흐름 재생
+let playTimer = null;
+
+function startPlay() {
+  const points = currentPoints();
+  if (points.length < 3) return;
+  const hist = analysisHistory();
+  const pad = (arr) => {
+    const lo = Math.min(...arr), hi = Math.max(...arr);
+    const p = (hi - lo) * 0.06 || 0.1;
+    return [lo - p, hi + p];
+  };
+  const range = { x: pad(points.map((p) => p.x)), y: pad(points.map((p) => p.y)) };
+  const frames = Math.min(points.length, 150);
+  let f = 1;
+  el.play.textContent = '❚❚ 멈춤';
+  el.play.setAttribute('aria-pressed', 'true');
+  playTimer = setInterval(() => {
+    const n = Math.max(2, Math.round((points.length * f) / frames));
+    drawTrajectory(points.slice(0, n), { hist, fc: null, fixedRange: range, noForecast: true });
+    f += 1;
+    if (f > frames) stopPlay();
+  }, 70);
+}
+
+function stopPlay({ silent = false } = {}) {
+  if (!playTimer) return;
+  clearInterval(playTimer);
+  playTimer = null;
+  el.play.textContent = '▶ 흐름 재생';
+  el.play.setAttribute('aria-pressed', 'false');
+  if (!silent) render();
+}
+
+// ------------------------------------------------------------ 주소(해시)에 선택 상태 저장 → 링크 공유
+function writeHash() {
+  const p = new URLSearchParams();
+  p.set('v', state.version); p.set('y', state.yAxis); p.set('f', state.freq); p.set('h', String(state.horizon));
+  if (state.start !== FREQUENCIES[state.freq].minDate) p.set('s', state.start);
+  if (!state.endAuto && state.end) p.set('e', state.end);
+  const next = `#${p.toString()}`;
+  if (location.hash !== next) history.replaceState(null, '', next);
+}
+
+function readHash() {
+  const p = new URLSearchParams(location.hash.slice(1));
+  if (VERSIONS[p.get('v')]) state.version = p.get('v');
+  if (Y_AXES[p.get('y')]) state.yAxis = p.get('y');
+  if (FREQUENCIES[p.get('f')]) state.freq = p.get('f');
+  const h = Number(p.get('h'));
+  if (horizonsFor(state.freq).includes(h)) state.horizon = h;
+  const re = /^\d{4}-\d{2}-\d{2}$/;
+  state.start = FREQUENCIES[state.freq].minDate;
+  if (re.test(p.get('s') || '')) { state.start = p.get('s'); state.rangeYears = 'custom'; }
+  if (re.test(p.get('e') || '')) { state.end = p.get('e'); state.endAuto = false; state.rangeYears = 'custom'; }
 }
 
 // ------------------------------------------------------------ 흐름
@@ -218,7 +578,7 @@ async function loadAndRender({ refresh = false } = {}) {
   el.reload.disabled = true;
   setStatus(refresh ? '저장된 CSV를 다시 읽는 중…' : '저장된 CSV를 읽는 중…');
   try {
-    if (refresh) { state.rows = {}; state.recessionPeriods = null; }
+    if (refresh) { state.rows = {}; state.recessionPeriods = null; analysisCache.clear(); }
     await Promise.all([ensureRows(state.freq, { refresh }), ensureRecessionPeriods({ refresh })]);
     if (applyDateRules()) render();
     setStatus('');
@@ -227,7 +587,8 @@ async function loadAndRender({ refresh = false } = {}) {
     console.error(err);
     showLoadError(err);
     [el.chartX, el.chartY, el.chartTraj].forEach(clearChart);
-    renderCards(null);
+    el.diagnosis.innerHTML = '';
+    el.forecastBody.innerHTML = '';
     setStatus('');
   } finally {
     el.reload.disabled = false;
@@ -236,47 +597,95 @@ async function loadAndRender({ refresh = false } = {}) {
 
 async function updateMeta() {
   const meta = await loadMeta();
-  if (!meta) { el.meta.textContent = '데이터 출처: FRED (저장소에 보관된 CSV)'; return; }
+  if (!meta) {
+    el.meta.textContent = '데이터 출처: FRED (저장소에 보관된 CSV)';
+    el.fresh.textContent = '데이터 출처: FRED';
+    return;
+  }
   const when = new Date(meta.updated_at);
   const whenText = Number.isNaN(when.getTime()) ? meta.updated_at
     : when.toLocaleString('ko-KR', { dateStyle: 'medium', timeStyle: 'short' });
   const m = meta.series?.BAA?.last, d = meta.series?.DBAA?.last;
   el.meta.textContent = `데이터 출처: FRED · 저장소 CSV 마지막 갱신 ${whenText}` +
     (m ? ` · 월간 최신 ${m}` : '') + (d ? ` · 일간 최신 ${d}` : '');
+  el.fresh.textContent = `FRED · 일간 최신 ${d || '—'} · 월간 최신 ${m ? m.slice(0, 7) : '—'}`;
+}
+
+/** 세그먼트(라디오 버튼 묶음) 만들기 */
+function buildSeg(container, items, current, onPick) {
+  container.innerHTML = items
+    .map(([value, label, sub]) => `<button type="button" role="radio" data-value="${value}" aria-checked="${value === current}">${label}${sub ? `<small>${sub}</small>` : ''}</button>`)
+    .join('');
+  container.onclick = (ev) => {
+    const b = ev.target.closest('button[data-value]');
+    if (!b) return;
+    container.querySelectorAll('button').forEach((x) => x.setAttribute('aria-checked', String(x === b)));
+    onPick(b.dataset.value);
+  };
+  // 화살표 키로 이동
+  container.onkeydown = (ev) => {
+    if (!['ArrowLeft', 'ArrowRight'].includes(ev.key)) return;
+    const btns = [...container.querySelectorAll('button')];
+    const i = btns.indexOf(document.activeElement);
+    if (i < 0) return;
+    const next = btns[(i + (ev.key === 'ArrowRight' ? 1 : btns.length - 1)) % btns.length];
+    next.focus();
+    next.click();
+    ev.preventDefault();
+  };
+}
+
+function buildHorizonSeg() {
+  const list = horizonsFor(state.freq);
+  if (!list.includes(state.horizon)) state.horizon = list.includes(FORECAST.defaultHorizon) ? FORECAST.defaultHorizon : list[0];
+  buildSeg(el.horizonSeg, list.map((m) => [String(m), horizonLabel(m)]), String(state.horizon), (val) => {
+    state.horizon = Number(val);
+    state.highlightAnalog = null;
+    if (state.rows[state.freq]) render();
+  });
 }
 
 function bindControls() {
-  el.version.innerHTML = Object.entries(VERSIONS)
-    .map(([k, v]) => `<option value="${k}">${v.label}</option>`).join('');
-  el.freq.innerHTML = Object.entries(FREQUENCIES)
-    .map(([k, f]) => `<option value="${k}">${f.label}</option>`).join('');
-  el.version.value = state.version;
-  el.freq.value = state.freq;
+  buildSeg(el.versionSeg, Object.entries(VERSIONS).map(([k, v]) => [k, v.menu, k]), state.version, (val) => {
+    state.version = val;
+    state.highlightAnalog = null;
+    if (state.rows[state.freq]) render();
+  });
+  buildSeg(el.yAxisSeg, Object.entries(Y_AXES).map(([k, y]) => [k, y.menu]), state.yAxis, (val) => {
+    state.yAxis = val;
+    state.highlightAnalog = null;
+    if (state.rows[state.freq]) render();
+  });
+  buildSeg(el.freqSeg, Object.entries(FREQUENCIES).map(([k, f]) => [k, f.label]), state.freq, (val) => {
+    state.freq = val;
+    state.highlightAnalog = null;
+    buildHorizonSeg();
+    loadAndRender();
+  });
+  buildHorizonSeg();
+
   el.size.value = state.markerSize;
   el.sizeOut.textContent = state.markerSize;
   el.optRecession.checked = state.features.recession;
   el.optPhases.checked = state.features.phases;
   el.optEvents.checked = state.features.events;
+  el.optArrows.checked = state.features.arrows;
+  el.optRecent.checked = state.features.recent;
+  el.optForecast.checked = state.features.forecast;
   el.colorMode.value = state.colorMode;
   el.rangeButtons.innerHTML = RANGE_BUTTONS
-    .map((r) => `<button type="button" class="chip" data-years="${r.years ?? ''}">${r.label}</button>`).join('');
+    .map((r) => `<button type="button" class="chip" data-years="${r.years ?? ''}" aria-pressed="false">${r.label}</button>`).join('');
 
-  el.version.addEventListener('change', () => {
-    state.version = el.version.value;
-    if (state.rows[state.freq]) render();
-  });
-  el.freq.addEventListener('change', () => {
-    state.freq = el.freq.value;
-    loadAndRender();
-  });
   el.start.addEventListener('change', () => {
     state.start = el.start.value;
-    state.endAuto = false;
+    state.rangeYears = 'custom';
     if (applyDateRules()) render();
   });
   el.end.addEventListener('change', () => {
     state.end = el.end.value;
     state.endAuto = !el.end.value;
+    state.rangeYears = 'custom';
+    state.highlightAnalog = null;
     if (applyDateRules()) render();
   });
   el.size.addEventListener('input', () => {
@@ -285,15 +694,36 @@ function bindControls() {
     setTrajectoryMarkerSize(el.chartTraj, state.markerSize);
   });
   el.reload.addEventListener('click', () => loadAndRender({ refresh: true }));
+  el.play.addEventListener('click', () => (playTimer ? stopPlay() : startPlay()));
+  el.zoom.addEventListener('click', () => {
+    state.zoomCurrent = !state.zoomCurrent;
+    el.zoom.setAttribute('aria-pressed', String(state.zoomCurrent));
+    if (state.rows[state.freq]) render();
+  });
   el.rangeButtons.addEventListener('click', (ev) => {
     const btn = ev.target.closest('button[data-years]');
     if (!btn) return;
     applyQuickRange(btn.dataset.years === '' ? null : Number(btn.dataset.years));
   });
-  el.optRecession.addEventListener('change', () => { state.features.recession = el.optRecession.checked; if (state.rows[state.freq]) render(); });
-  el.optPhases.addEventListener('change', () => { state.features.phases = el.optPhases.checked; if (state.rows[state.freq]) render(); });
-  el.optEvents.addEventListener('change', () => { state.features.events = el.optEvents.checked; if (state.rows[state.freq]) render(); });
+  const toggle = (input, key) => input.addEventListener('change', () => {
+    state.features[key] = input.checked;
+    if (state.rows[state.freq]) render();
+  });
+  toggle(el.optRecession, 'recession');
+  toggle(el.optPhases, 'phases');
+  toggle(el.optEvents, 'events');
+  toggle(el.optArrows, 'arrows');
+  toggle(el.optRecent, 'recent');
+  toggle(el.optForecast, 'forecast');
   el.colorMode.addEventListener('change', () => { state.colorMode = el.colorMode.value; if (state.rows[state.freq]) render(); });
+
+  el.forecastBody.addEventListener('click', (ev) => {
+    const b = ev.target.closest('button.analog');
+    if (!b) return;
+    state.highlightAnalog = state.highlightAnalog === b.dataset.date ? null : b.dataset.date;
+    if (!state.features.forecast) { state.features.forecast = true; el.optForecast.checked = true; }
+    render();
+  });
 
   let t;
   window.addEventListener('resize', () => {
@@ -306,10 +736,11 @@ function bindControls() {
 if (typeof Plotly === 'undefined') {
   showNotice('error', '<p><strong>그래프 라이브러리(Plotly)를 불러오지 못했습니다.</strong> 데이터 문제는 아니며, 페이지를 새로고침해 보세요.</p>');
 } else {
+  readHash();
   bindControls();
   updateMeta();
   loadAndRender();
 }
 
 // 개발자 도구에서 상태 확인용
-window.__creditCycle = { state, currentPoints };
+window.__creditCycle = { state, currentPoints, analysisHistory, computeForecast };

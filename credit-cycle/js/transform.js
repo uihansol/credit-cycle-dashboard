@@ -67,6 +67,110 @@ export function aggregateAnnualMean(rows, keys = ['BAA', 'AAA', 'GS10', 'GS2', '
 }
 
 /**
+ * 일간 정렬 데이터 → 주평균. 한 주 = 월~일 (금요일 마감 주). date는 그 주의
+ * "마지막 실제 관측일"(보통 금요일)이라 진행 중인 주도 미래 날짜가 생기지 않는다.
+ * days = 그 주에 들어간 관측일 수. 키별로 값이 있는 날만 평균에 넣는다(연평균과 같은 규칙).
+ */
+export function aggregateWeeklyMean(rows, keys = ['BAA', 'AAA', 'GS10', 'GS2', 'HY']) {
+  const byWeek = new Map();
+  for (const r of rows) {
+    const wk = weekEnding(r.date);
+    if (!byWeek.has(wk)) byWeek.set(wk, { n: 0, last: r.date, sums: {}, counts: {} });
+    const g = byWeek.get(wk);
+    g.n += 1;
+    if (r.date > g.last) g.last = r.date;
+    for (const k of keys) {
+      const v = r[k];
+      if (v === null || v === undefined || !Number.isFinite(v)) continue;
+      g.sums[k] = (g.sums[k] || 0) + v;
+      g.counts[k] = (g.counts[k] || 0) + 1;
+    }
+  }
+  return [...byWeek.entries()]
+    .sort(([a], [b]) => (a < b ? -1 : 1))
+    .map(([, g]) => ({
+      date: g.last,
+      days: g.n,
+      ...Object.fromEntries(keys.map((k) => [k, g.counts[k] ? g.sums[k] / g.counts[k] : null])),
+    }));
+}
+
+/** 'YYYY-MM-DD' 가 속한 주(월~일)의 금요일 날짜. 토·일은 그 주 금요일로 묶는다. */
+export function weekEnding(date) {
+  const d = parseUTC(date);
+  const dow = d.getUTCDay(); // 0=일 … 6=토
+  const offset = dow === 0 ? -2 : 5 - dow; // 일요일은 이틀 전 금요일, 나머지는 이번 주 금요일
+  d.setUTCDate(d.getUTCDate() + offset);
+  return iso(d);
+}
+
+const parseUTC = (date) => {
+  const [y, m, d] = date.split('-').map(Number);
+  return new Date(Date.UTC(y, (m || 1) - 1, d || 1));
+};
+const iso = (d) => d.toISOString().slice(0, 10);
+
+/**
+ * 날짜를 빈도 기준으로 k 단계 뒤로 민다 (전망 경로의 미래 날짜 생성용).
+ * daily = 영업일(주말 건너뜀), weekly = 7일, monthly = 1개월, annual('YYYY') = 1년.
+ */
+export function addSteps(date, freq, k) {
+  if (date.length === 4 || freq === 'annual') return String(Number(date.slice(0, 4)) + k);
+  const d = parseUTC(date);
+  if (freq === 'monthly') {
+    d.setUTCMonth(d.getUTCMonth() + k);
+    return iso(d);
+  }
+  if (freq === 'weekly') {
+    d.setUTCDate(d.getUTCDate() + 7 * k);
+    return iso(d);
+  }
+  let left = k;
+  while (left > 0) {
+    d.setUTCDate(d.getUTCDate() + 1);
+    const dow = d.getUTCDay();
+    if (dow !== 0 && dow !== 6) left -= 1;
+  }
+  return iso(d);
+}
+
+/** 두 날짜 사이의 개월 수 (대략, 소수 포함). 연간 'YYYY'는 연중앙으로 본다. */
+export function monthsBetween(a, b) {
+  const pa = parseUTC(a.length === 4 ? `${a}-07-01` : a);
+  const pb = parseUTC(b.length === 4 ? `${b}-07-01` : b);
+  return (pb - pa) / (1000 * 60 * 60 * 24 * 30.4375);
+}
+
+/** 중앙값 (빈 배열이면 NaN) */
+export function median(values) {
+  const v = values.filter(Number.isFinite).sort((a, b) => a - b);
+  if (!v.length) return NaN;
+  const m = Math.floor(v.length / 2);
+  return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+}
+
+/** value가 values 안에서 몇 번째 백분위인지 (0~100, 같은 값은 절반씩 셈) */
+export function percentileRank(values, value) {
+  const v = values.filter(Number.isFinite);
+  if (!v.length || !Number.isFinite(value)) return NaN;
+  let below = 0, equal = 0;
+  for (const x of v) { if (x < value) below += 1; else if (x === value) equal += 1; }
+  return ((below + equal / 2) / v.length) * 100;
+}
+
+/**
+ * 특정 날짜 이하에서 가장 가까운 점 (없으면 null). points는 날짜순 정렬 가정.
+ */
+export function pointAt(points, date) {
+  let lo = 0, hi = points.length - 1, ans = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (points[mid].date <= date) { ans = mid; lo = mid + 1; } else hi = mid - 1;
+  }
+  return ans < 0 ? null : points[ans];
+}
+
+/**
  * 시작일~종료일 필터 (양 끝 포함). 연간(date='YYYY')은 연도 단위로 비교.
  */
 export function filterByDate(rows, start, end) {
@@ -98,6 +202,7 @@ export function formatDateLabel(date, freq) {
   if (date.length === 4) return `${date}년`;
   const [y, m, d] = date.split('-').map(Number);
   if (freq === 'daily') return `${y}년 ${m}월 ${d}일`;
+  if (freq === 'weekly') return `${y}년 ${m}월 ${d}일 주`;
   return `${y}년 ${m}월`;
 }
 
@@ -160,7 +265,5 @@ export function computeSpeeds(points) {
 }
 
 // ------------------------------------------------------------
-// [확장 지점] 향후 분석 함수는 여기에 순수 함수로 추가한다.
-//  - findSimilarPeriods(points, target, k) : 현재와 비슷한 과거 위치 탐색
-//  - pointAt(points, date)       : 특정 날짜의 X/Y 조회
+// 유사 국면 탐색·전망 계산은 forecast.js 에 있다 (역시 순수 함수).
 // ------------------------------------------------------------

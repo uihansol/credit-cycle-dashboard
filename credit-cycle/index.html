@@ -7,30 +7,30 @@
   <meta name="description" content="장단기 금리차와 신용·하이일드 스프레드의 궤적으로 본 미국 거시 사이클 — 현재 국면 진단과 과거 유사 국면 기반 전망">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔄</text></svg>">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
-  <link rel="stylesheet" href="./css/style.css?v=956d11e0">
+  <link rel="stylesheet" href="./css/style.css?v=d8532c0b">
   <!-- 캐시 무효화: 모듈끼리의 import 도 같은 ?v= 로 받게 매핑한다. 값은 scripts/stamp_assets.py 가 자동으로 채운다. -->
   <script type="importmap">
   {
     "imports": {
-      "./js/config.js": "./js/config.js?v=956d11e0",
-      "./js/data-loader.js": "./js/data-loader.js?v=956d11e0",
-      "./js/transform.js": "./js/transform.js?v=956d11e0",
-      "./js/forecast.js": "./js/forecast.js?v=956d11e0",
-      "./js/charts.js": "./js/charts.js?v=956d11e0",
-      "./js/overlays.js": "./js/overlays.js?v=956d11e0"
+      "./js/config.js": "./js/config.js?v=d8532c0b",
+      "./js/data-loader.js": "./js/data-loader.js?v=d8532c0b",
+      "./js/transform.js": "./js/transform.js?v=d8532c0b",
+      "./js/forecast.js": "./js/forecast.js?v=d8532c0b",
+      "./js/charts.js": "./js/charts.js?v=d8532c0b",
+      "./js/overlays.js": "./js/overlays.js?v=d8532c0b"
     }
   }
   </script>
   <!-- 그래프 라이브러리만 CDN에서 받는다. 데이터는 ./data/*.csv 에서만 읽는다. -->
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8" defer></script>
-  <script type="module" src="./js/app.js?v=956d11e0"></script>
+  <script type="module" src="./js/app.js?v=d8532c0b"></script>
 </head>
 <body>
   <main class="page">
     <header class="masthead">
       <div class="masthead__text">
         <p class="eyebrow">US MACRO · CREDIT CYCLE</p>
-        <h1>미국 금리·신용 사이클 탐색기</h1>
+        <h1>미국 금리·신용 사이클 탐색기 <span class="build" id="build-info" title="빌드 번호는 GitHub Actions 실행 번호, 뒤의 8자리는 화면 코드(js/css) 버전입니다.">빌드 <!--build:start-->#15 · d8532c0b<!--build:end--></span></h1>
         <p class="masthead__lede">
           장단기 금리차(커브)와 신용·하이일드 스프레드가 함께 그리는 궤적으로
           거시 환경이 <strong>지금 어디에 있고</strong>, 과거 비슷한 국면에서는 <strong>어디로 움직였는지</strong> 봅니다.
@@ -43,70 +43,61 @@
       </div>
     </header>
 
-    <section class="panel toolbar" aria-label="분석 조건">
-      <div class="toolbar__group">
-        <span class="field__label" id="lbl-version">신용 지표 · 가로축</span>
-        <div id="version-seg" class="seg" role="radiogroup" aria-labelledby="lbl-version"></div>
-      </div>
-      <div class="toolbar__group">
-        <span class="field__label" id="lbl-yaxis">금리 구조 · 세로축</span>
-        <div id="yaxis-seg" class="seg" role="radiogroup" aria-labelledby="lbl-yaxis"></div>
-      </div>
-      <div class="toolbar__group">
-        <span class="field__label" id="lbl-freq">자료 빈도</span>
-        <div id="freq-seg" class="seg" role="radiogroup" aria-labelledby="lbl-freq"></div>
-      </div>
-      <div class="toolbar__group toolbar__group--period">
-        <span class="field__label">기간</span>
-        <div class="period">
-          <div id="range-buttons" class="chip-row" role="group" aria-label="빠른 기간 선택"></div>
-          <div class="period__dates">
-            <label class="sr-only" for="start">시작일</label>
-            <input type="date" id="start" aria-label="시작일">
-            <span class="period__sep" aria-hidden="true">~</span>
-            <label class="sr-only" for="end">종료일</label>
-            <input type="date" id="end" aria-label="종료일 (기준 시점)">
-          </div>
-        </div>
-      </div>
-
-      <details class="toolbar__more">
-        <summary>표시 옵션</summary>
-        <div class="option-grid">
-          <label class="option"><input type="checkbox" id="opt-phases"> 4단계 국면 배경</label>
-          <label class="option"><input type="checkbox" id="opt-recent"> 최근 흐름 강조</label>
-          <label class="option"><input type="checkbox" id="opt-arrows"> 흐름 화살표</label>
-          <label class="option"><input type="checkbox" id="opt-events"> 주요 시기 표시</label>
-          <label class="option"><input type="checkbox" id="opt-recession"> 경기침체 음영 (NBER)</label>
-          <label class="option option--select">
-            궤적 색상
-            <select id="color-mode">
-              <option value="time">시간(연도)</option>
-              <option value="speed">이동 속도</option>
-            </select>
-          </label>
-          <label class="option option--range">
-            점 크기 <output id="marker-size-out">7</output>
-            <input type="range" id="marker-size" min="3" max="18" step="1" value="7">
-          </label>
-        </div>
-      </details>
-      <p id="version-note" class="version-note" hidden></p>
-    </section>
-
     <div id="notice" class="notice" role="alert" hidden></div>
 
-    <!-- 현재 거시 환경 진단 -->
-    <section id="diagnosis" class="diagnosis" aria-label="현재 거시 환경 진단" aria-live="polite"></section>
-
-
     <nav class="tabs" role="tablist" aria-label="보기 전환">
-      <button type="button" role="tab" id="tab-btn-trajectory" data-tab="trajectory" aria-controls="tab-trajectory" aria-selected="true">궤적 · 전망</button>
-      <button type="button" role="tab" id="tab-btn-map" data-tab="map" aria-controls="tab-map" aria-selected="false">사이클 맵 <small>VIX</small></button>
+      <button type="button" role="tab" id="tab-btn-map" data-tab="map" aria-controls="tab-map" aria-selected="true">사이클 맵 <small>VIX</small></button>
+      <button type="button" role="tab" id="tab-btn-trajectory" data-tab="trajectory" aria-controls="tab-trajectory" aria-selected="false">궤적 · 전망</button>
       <button type="button" role="tab" id="tab-btn-series" data-tab="series" aria-controls="tab-series" aria-selected="false">시계열</button>
     </nav>
 
-    <div id="tab-trajectory" class="tab-panel" role="tabpanel" aria-labelledby="tab-btn-trajectory">
+    <div id="tab-map" class="tab-panel" role="tabpanel" aria-labelledby="tab-btn-map">
+      <article class="panel chart-panel chart-panel--hero">
+        <header class="chart-panel__head chart-panel__head--row">
+          <div>
+            <h2>사이클 맵 — 장단기 금리 × 신용스프레드 × 변동성</h2>
+            <p id="map-sub" class="chart-panel__sub"></p>
+          </div>
+          <div id="map-vix-now" class="pill pill--vix" hidden></div>
+        </header>
+        <div id="chart-map" class="chart chart--map"></div>
+        <p id="map-hint" class="map-hint" hidden></p>
+        <div class="map-controls">
+          <div class="toolbar__group">
+            <span class="field__label" id="lbl-map-y">세로축</span>
+            <div id="map-y-seg" class="seg seg--small" role="radiogroup" aria-labelledby="lbl-map-y"></div>
+          </div>
+          <div class="toolbar__group">
+            <span class="field__label">로그 스케일</span>
+            <div class="option-row">
+              <label class="option"><input type="checkbox" id="map-logx"> 가로축</label>
+              <label class="option"><input type="checkbox" id="map-logy"> 세로축</label>
+            </div>
+          </div>
+          <div class="toolbar__group">
+            <span class="field__label" id="lbl-map-size">원 크기</span>
+            <div id="map-size-seg" class="seg seg--small" role="radiogroup" aria-labelledby="lbl-map-size"></div>
+          </div>
+          <div class="toolbar__group">
+            <span class="field__label">표시</span>
+            <div class="option-row">
+              <label class="option"><input type="checkbox" id="map-line"> 연결선</label>
+              <label class="option"><input type="checkbox" id="map-labels"> 날짜 라벨</label>
+              <label class="option"><input type="checkbox" id="map-cycle"> 국면·순환 화살표</label>
+            </div>
+          </div>
+        </div>
+        <p class="chart-panel__note">
+          원의 색은 연도(과거 → 최근 그라데이션), <strong>원의 크기는 그 시점의 VIX</strong>입니다 — 큰 원이 이어지는 구간일수록
+          시장 변동성이 커서 궤적이 빠르게 움직였습니다. <span class="legend-dot legend-dot--current"></span>빨간 테두리 원이 현재 위치,
+          회색 화살표는 신용 사이클의 일반적인 순환 방향(#1 위험 → #2 회복 → #3 확장 → #4 둔화)입니다.
+          VIX 값이 없는 시점(1990년 이전, 휴장일 등)은 작은 회색 테두리 원으로 표시합니다.
+        </p>
+      </article>
+    </div>
+
+
+    <div id="tab-trajectory" class="tab-panel" role="tabpanel" aria-labelledby="tab-btn-trajectory" hidden>
       <section class="workspace">
         <article class="panel chart-panel chart-panel--hero">
           <header class="chart-panel__head chart-panel__head--row">
@@ -162,51 +153,6 @@
 
     </div>
 
-    <div id="tab-map" class="tab-panel" role="tabpanel" aria-labelledby="tab-btn-map" hidden>
-      <article class="panel chart-panel chart-panel--hero">
-        <header class="chart-panel__head chart-panel__head--row">
-          <div>
-            <h2>사이클 맵 — 장단기 금리 × 신용스프레드 × 변동성</h2>
-            <p id="map-sub" class="chart-panel__sub"></p>
-          </div>
-          <div id="map-vix-now" class="pill pill--vix" hidden></div>
-        </header>
-        <div class="map-controls">
-          <div class="toolbar__group">
-            <span class="field__label" id="lbl-map-y">세로축</span>
-            <div id="map-y-seg" class="seg seg--small" role="radiogroup" aria-labelledby="lbl-map-y"></div>
-          </div>
-          <div class="toolbar__group">
-            <span class="field__label">로그 스케일</span>
-            <div class="option-row">
-              <label class="option"><input type="checkbox" id="map-logx"> 가로축</label>
-              <label class="option"><input type="checkbox" id="map-logy"> 세로축</label>
-            </div>
-          </div>
-          <div class="toolbar__group">
-            <span class="field__label" id="lbl-map-size">원 크기</span>
-            <div id="map-size-seg" class="seg seg--small" role="radiogroup" aria-labelledby="lbl-map-size"></div>
-          </div>
-          <div class="toolbar__group">
-            <span class="field__label">표시</span>
-            <div class="option-row">
-              <label class="option"><input type="checkbox" id="map-line"> 연결선</label>
-              <label class="option"><input type="checkbox" id="map-labels"> 날짜 라벨</label>
-              <label class="option"><input type="checkbox" id="map-cycle"> 국면·순환 화살표</label>
-            </div>
-          </div>
-        </div>
-        <p id="map-hint" class="map-hint" hidden></p>
-        <div id="chart-map" class="chart chart--map"></div>
-        <p class="chart-panel__note">
-          원의 색은 연도(과거 → 최근 그라데이션), <strong>원의 크기는 그 시점의 VIX</strong>입니다 — 큰 원이 이어지는 구간일수록
-          시장 변동성이 커서 궤적이 빠르게 움직였습니다. <span class="legend-dot legend-dot--current"></span>빨간 테두리 원이 현재 위치,
-          회색 화살표는 신용 사이클의 일반적인 순환 방향(#1 위험 → #2 회복 → #3 확장 → #4 둔화)입니다.
-          VIX 값이 없는 시점(1990년 이전, 휴장일 등)은 작은 회색 테두리 원으로 표시합니다.
-        </p>
-      </article>
-    </div>
-
     <div id="tab-series" class="tab-panel" role="tabpanel" aria-labelledby="tab-btn-series" hidden>
       <section class="grid-2">
         <article class="panel chart-panel">
@@ -236,6 +182,61 @@
       </p>
 
     </div>
+
+
+    <section class="panel toolbar" aria-label="분석 조건 (축·기간·빈도)">
+      <div class="toolbar__group">
+        <span class="field__label" id="lbl-version">신용 지표 · 가로축</span>
+        <div id="version-seg" class="seg" role="radiogroup" aria-labelledby="lbl-version"></div>
+      </div>
+      <div class="toolbar__group">
+        <span class="field__label" id="lbl-yaxis">금리 구조 · 세로축</span>
+        <div id="yaxis-seg" class="seg" role="radiogroup" aria-labelledby="lbl-yaxis"></div>
+      </div>
+      <div class="toolbar__group">
+        <span class="field__label" id="lbl-freq">자료 빈도</span>
+        <div id="freq-seg" class="seg" role="radiogroup" aria-labelledby="lbl-freq"></div>
+      </div>
+      <div class="toolbar__group toolbar__group--period">
+        <span class="field__label">기간</span>
+        <div class="period">
+          <div id="range-buttons" class="chip-row" role="group" aria-label="빠른 기간 선택"></div>
+          <div class="period__dates">
+            <label class="sr-only" for="start">시작일</label>
+            <input type="date" id="start" aria-label="시작일">
+            <span class="period__sep" aria-hidden="true">~</span>
+            <label class="sr-only" for="end">종료일</label>
+            <input type="date" id="end" aria-label="종료일 (기준 시점)">
+          </div>
+        </div>
+      </div>
+
+      <details class="toolbar__more">
+        <summary>표시 옵션</summary>
+        <div class="option-grid">
+          <label class="option"><input type="checkbox" id="opt-phases"> 4단계 국면 배경</label>
+          <label class="option"><input type="checkbox" id="opt-recent"> 최근 흐름 강조</label>
+          <label class="option"><input type="checkbox" id="opt-arrows"> 흐름 화살표</label>
+          <label class="option"><input type="checkbox" id="opt-events"> 주요 시기 표시</label>
+          <label class="option"><input type="checkbox" id="opt-recession"> 경기침체 음영 (NBER)</label>
+          <label class="option option--select">
+            궤적 색상
+            <select id="color-mode">
+              <option value="time">시간(연도)</option>
+              <option value="speed">이동 속도</option>
+            </select>
+          </label>
+          <label class="option option--range">
+            점 크기 <output id="marker-size-out">7</output>
+            <input type="range" id="marker-size" min="3" max="18" step="1" value="7">
+          </label>
+        </div>
+      </details>
+      <p id="version-note" class="version-note" hidden></p>
+    </section>
+
+    <!-- 현재 거시 환경 진단 -->
+    <section id="diagnosis" class="diagnosis" aria-label="현재 거시 환경 진단" aria-live="polite"></section>
 
     <footer class="footer">
       <p id="data-meta">데이터 출처: FRED (저장소에 보관된 CSV)</p>

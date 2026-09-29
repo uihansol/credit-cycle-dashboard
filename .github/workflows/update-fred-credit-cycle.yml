@@ -48,7 +48,9 @@ jobs:
           LOOKBACK_DAYS: ${{ github.event.inputs.lookback_days || '120' }}
         run: python credit-cycle/scripts/update_fred.py
 
-      - name: Stamp asset versions (cache busting)
+      - name: Stamp asset versions & build number (cache busting)
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
         run: python credit-cycle/scripts/stamp_assets.py
 
       - name: Commit & push if changed

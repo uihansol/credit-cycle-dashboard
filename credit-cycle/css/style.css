@@ -48,7 +48,7 @@ body {
 .page {
   max-width: 1360px;
   margin: 0 auto;
-  padding: 26px 20px 40px;
+  padding: 18px 20px 40px;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -75,7 +75,7 @@ body {
   font-weight: 750;
   letter-spacing: -0.025em;
 }
-.masthead__lede { margin: 6px 0 0; color: var(--ink-2); max-width: 760px; }
+.masthead__lede { margin: 4px 0 0; color: var(--ink-2); max-width: 760px; font-size: 0.9rem; }
 .masthead__lede strong { color: var(--ink); font-weight: 650; }
 .masthead__meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .pill {
@@ -85,6 +85,23 @@ body {
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 4px 12px;
+}
+
+/* 제목 옆 빌드 표시 */
+.build {
+  display: inline-block;
+  vertical-align: middle;
+  margin-left: 8px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--muted);
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 10px;
+  cursor: help;
+  font-feature-settings: "tnum";
 }
 
 /* ---------------------------------------------------- 패널 */
@@ -331,13 +348,13 @@ input[type="range"] { accent-color: var(--accent); }
 
 /* ---------------------------------------------------- 사이클 맵 */
 .map-controls {
+  border-top: 1px solid var(--line);
+  margin-top: 8px;
   display: flex;
   flex-wrap: wrap;
   gap: 10px 24px;
   align-items: flex-end;
   padding: 10px 0 6px;
-  border-bottom: 1px solid var(--line);
-  margin-bottom: 6px;
 }
 .option-row { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; min-height: 30px; }
 .map-hint {
@@ -349,7 +366,7 @@ input[type="range"] { accent-color: var(--accent); }
   padding: 6px 10px;
 }
 .pill--vix { color: var(--forecast); border-color: #d9ccef; background: var(--forecast-soft); font-weight: 650; white-space: nowrap; }
-.chart--map { height: 720px; }
+.chart--map { height: clamp(440px, calc(100vh - 315px), 820px); } /* 차트가 첫 화면에 꽉 차도록 */
 .chart-panel--wide { grid-column: 1 / -1; }
 
 /* ---------------------------------------------------- 궤적 + 전망 */
@@ -476,7 +493,8 @@ input[type="range"] { accent-color: var(--accent); }
   .period__dates input { flex: 1; min-width: 0; }
   .chart--small { height: 230px; }
   .chart--large { height: 460px; }
-  .chart--map { height: 520px; }
+  .chart--map { height: 540px; }
+  .build { margin-left: 0; margin-top: 4px; }
   .tabs button { padding: 9px 11px 8px; font-size: 0.9rem; }
   .map-controls .toolbar__group { width: auto; }
   .chart-panel, .chart-panel--hero { padding: 14px 10px 8px; }

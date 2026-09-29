@@ -9,11 +9,14 @@ index.html 이 불러오는 js/css 파일 주소에 내용 기반 버전(?v=해�
 
   - <script type="module" src="./js/app.js?v=..."> 와 <link href="./css/style.css?v=...">
   - <script type="importmap"> 안의 "./js/xxx.js": "./js/xxx.js?v=..." (모듈끼리의 import도 같은 버전으로 연결)
+  - 제목 옆 빌드 표시 <!--build:start-->#번호 · 해시<!--build:end--> :
+    번호 = 환경변수 BUILD_NUMBER(GitHub Actions 실행 번호, 없으면 기존 값 유지), 해시 = 위와 같은 코드 버전
 GitHub Actions(update-fred-credit-cycle.yml)가 매번 실행하며, 로컬에서 직접 돌려도 된다.
 """
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import sys
 from pathlib import Path
@@ -41,12 +44,23 @@ def stamp(html: str, version: str) -> str:
     return imap.sub(lambda m: f'{m.group(1)}{m.group(2)}"{m.group(3)}?v={version}"', html)
 
 
+BUILD_RE = re.compile(r"<!--build:start-->#([\w]+) · ([\w]+)<!--build:end-->")
+
+
+def stamp_build(html: str, version: str, number: str | None) -> str:
+    """제목 옆 '빌드 #번호 · 해시' 를 갱신한다. number 가 없으면 기존 번호를 유지한다."""
+    def repl(m: re.Match) -> str:
+        return f"<!--build:start-->#{number or m.group(1)} · {version}<!--build:end-->"
+    return BUILD_RE.sub(repl, html)
+
+
 def main() -> int:
     html = INDEX.read_text("utf-8")
-    new = stamp(html, content_hash())
+    version = content_hash()
+    new = stamp_build(stamp(html, version), version, os.environ.get("BUILD_NUMBER", "").strip() or None)
     if new != html:
         INDEX.write_text(new, "utf-8")
-        print(f"index.html 자산 버전 갱신: ?v={content_hash()}")
+        print(f"index.html 자산·빌드 표시 갱신: ?v={version}")
     else:
         print("자산 버전 변화 없음")
     return 0

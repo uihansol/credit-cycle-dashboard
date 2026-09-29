@@ -33,7 +33,7 @@ const state = {
   horizon: FORECAST.defaultHorizon, // 전망 기간(개월)
   highlightAnalog: null,   // 강조할 유사 시점 날짜
   zoomCurrent: false,      // 궤적을 최근 3년 + 전망 경로 범위로 확대
-  tab: 'trajectory',       // 'trajectory' | 'map' | 'series' — 보이는 탭만 그린다
+  tab: 'map',              // 'map' | 'trajectory' | 'series' — 보이는 탭만 그린다 (기본: 사이클 맵)
   map: { ...MAP_DEFAULTS }, // 사이클 맵 탭 옵션 (세로축·로그·원 크기 등)
   rows: {},                // freq → 정렬된 원자료 행
   latest: {},              // freq → 마지막 관측 날짜 (YYYY-MM-DD)
@@ -436,7 +436,7 @@ function drawCycleMap(hist) {
 
 // ------------------------------------------------------------ 탭
 function setTab(tab, { focus = false } = {}) {
-  if (!['trajectory', 'map', 'series'].includes(tab)) tab = 'trajectory';
+  if (!['map', 'trajectory', 'series'].includes(tab)) tab = 'map';
   state.tab = tab;
   el.tabs.forEach((b) => {
     const on = b.dataset.tab === tab;
@@ -653,7 +653,7 @@ function writeHash() {
   p.set('v', state.version); p.set('y', state.yAxis); p.set('f', state.freq); p.set('h', String(state.horizon));
   if (state.start !== FREQUENCIES[state.freq].minDate) p.set('s', state.start);
   if (!state.endAuto && state.end) p.set('e', state.end);
-  if (state.tab !== 'trajectory') p.set('t', state.tab);
+  if (state.tab !== 'map') p.set('t', state.tab);
   if (state.map.yAxis !== MAP_DEFAULTS.yAxis) p.set('my', state.map.yAxis);
   const next = `#${p.toString()}`;
   if (location.hash !== next) history.replaceState(null, '', next);

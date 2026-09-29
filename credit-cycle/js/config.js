@@ -62,7 +62,7 @@ export const RECESSION_FILE = { USREC: 'USREC' };
 export const DEFAULT_FREQ = 'monthly';
 export const DEFAULT_VERSION = 'V2';
 export const DEFAULT_MARKER_SIZE = 7;
-export const DEFAULT_Y_AXIS = 'spread';
+export const DEFAULT_Y_AXIS = 'ratio';
 
 /**
  * 세로축(Y) — 장단기 금리 구조. 모든 버전 공통으로 두 가지 중 고른다.
@@ -72,7 +72,8 @@ export const DEFAULT_Y_AXIS = 'spread';
  *    10Y/2Y 비율은 금리 수준이 낮을 때(2Y≈0) 값이 크게 튀므로 비율 변화로 옮겨야 자연스럽다.
  */
 export const Y_AXES = {
-  // 기본값은 금리차(spread): 비율은 2Y≈0이던 2011~2021년에 10 가까이 튀어 최근 구간이 눌려 보인다.
+  // 기본값은 비율(ratio): 첫 화면인 사이클 맵이 양축 로그 스케일이라 비율의 큰 변동폭이 잘 펴진다.
+  // (궤적·전망 탭처럼 선형 축에서는 2Y≈0이던 2011~2021년에 10 가까이 튀어 최근이 눌려 보이므로 금리차로 바꿔 보세요.)
   ratio: {
     label: '10Y / 2Y 국채금리 비율',
     short: '10Y/2Y',
@@ -104,8 +105,8 @@ export const Y_AXIS = Y_AXES.ratio;
  *  - separationMonths: 유사 시점끼리 최소 간격 (같은 에피소드가 여러 번 뽑히지 않게)
  *  - momentumWeight: 위치 대비 최근 흐름의 가중치
  */
-/** 사이클 맵 탭 기본값 — 참고 차트처럼 10Y/2Y 비율 + 양축 로그 + VIX 크기 */
-export const MAP_DEFAULTS = { yAxis: 'ratio', logX: true, logY: true, sizeMode: 'vix', line: false, labels: true, cycle: true };
+/** 사이클 맵 탭 기본값 — 참고 차트처럼 양축 로그 + VIX 크기 (세로축 종류는 공통 조건 `state.yAxis`를 따른다) */
+export const MAP_DEFAULTS = { logX: true, logY: true, sizeMode: 'vix', line: false, labels: true, cycle: true };
 
 export const FORECAST = {
   horizons: [6, 12, 24],

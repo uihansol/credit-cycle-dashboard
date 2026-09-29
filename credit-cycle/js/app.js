@@ -34,7 +34,7 @@ const state = {
   highlightAnalog: null,   // 강조할 유사 시점 날짜
   zoomCurrent: false,      // 궤적을 최근 3년 + 전망 경로 범위로 확대
   tab: 'map',              // 'map' | 'trajectory' | 'series' — 보이는 탭만 그린다 (기본: 사이클 맵)
-  map: { ...MAP_DEFAULTS }, // 사이클 맵 탭 옵션 (세로축·로그·원 크기 등)
+  map: { ...MAP_DEFAULTS }, // 사이클 맵 탭 옵션 (로그·원 크기·표시). 세로축은 공통 state.yAxis 를 쓴다
   rows: {},                // freq → 정렬된 원자료 행
   latest: {},              // freq → 마지막 관측 날짜 (YYYY-MM-DD)
   splices: {},             // freq → 버전 → 이어 붙인 정보 {offset, overlap, realStart}
@@ -63,7 +63,8 @@ const el = {
   colorMode: $('color-mode'),
   tabs: document.querySelectorAll('[role="tab"][data-tab]'),
   chartMap: $('chart-map'), chartVix: $('chart-vix'), mapSub: $('map-sub'), mapVixNow: $('map-vix-now'),
-  mapYSeg: $('map-y-seg'), mapSizeSeg: $('map-size-seg'), mapHint: $('map-hint'),
+  mapSizeSeg: $('map-size-seg'), mapHint: $('map-hint'), viewTitle: $('view-title'), sizeLabel: $('size-label'),
+  viewGroups: document.querySelectorAll('[data-tabs]'),
   mapLogX: $('map-logx'), mapLogY: $('map-logy'), mapLine: $('map-line'), mapLabels: $('map-labels'), mapCycle: $('map-cycle'),
 };
 const ALL_CHARTS = () => [el.chartX, el.chartY, el.chartTraj, el.chartMap, el.chartVix];
@@ -266,6 +267,7 @@ function currentPoints() {
 
 function render() {
   stopPlay({ silent: true });
+  syncOptionUi();
   // 이전 렌더링의 "데이터 없음" 안내는 버전·빈도가 바뀌면 더 이상 맞지 않으므로 여기서 지운다.
   if (el.notice.dataset.tag === 'nodata') clearNotice();
   const v = VERSIONS[state.version];
@@ -392,7 +394,7 @@ function zoomRange(points, proj, fcfg) {
 function drawCycleMap(hist) {
   const v = VERSIONS[state.version];
   const m = state.map;
-  const y = Y_AXES[m.yAxis];
+  const y = Y_AXES[state.yAxis];
   const fcfg = FREQUENCIES[state.freq];
   const rows = filterByDate(state.rows[state.freq] || [], state.start, state.end);
   const points = computePoints(rows, v, y);
@@ -404,7 +406,7 @@ function drawCycleMap(hist) {
   const logX = m.logX && points.every((p) => p.x > 0);
   const logY = m.logY && points.every((p) => p.y > 0);
   if (m.logX && !logX) hints.push(`${v.xShort}에 0 이하 값이 있어 가로축 로그 스케일을 적용할 수 없습니다.`);
-  if (m.logY && !logY) hints.push(`${y.menu}는 역전 시 음수가 되어 세로축 로그 스케일을 적용할 수 없습니다 — 로그로 보려면 세로축을 10Y/2Y 비율로 바꾸세요.`);
+  if (m.logY && !logY) hints.push(`10Y−2Y 금리차는 역전 시 음수가 되어 세로축 로그 스케일을 쓸 수 없습니다 — 위 ‘세로축 · 금리 구조’를 10Y/2Y 비율로 바꾸면 로그로 볼 수 있습니다.`);
   const hasVix = points.some((p) => Number.isFinite(p.raw?.VIX));
   if (m.sizeMode === 'vix' && !hasVix) {
     hints.push(skippedSeries.has('VIX')
@@ -445,6 +447,25 @@ function setTab(tab, { focus = false } = {}) {
     document.getElementById(b.getAttribute('aria-controls')).hidden = !on;
     if (on && focus) b.focus();
   });
+  syncOptionUi();
+}
+
+const TAB_TITLES = { map: '· 사이클 맵', trajectory: '· 궤적 · 전망', series: '· 시계열' };
+
+/** 보고 있는 탭에 해당하는 표시 옵션만 보이게 하고, 지금 쓸 수 없는 옵션은 비활성화한다. */
+function syncOptionUi() {
+  el.viewGroups.forEach((g) => { g.hidden = !g.dataset.tabs.split(' ').includes(state.tab); });
+  el.viewTitle.textContent = TAB_TITLES[state.tab] || '';
+  // 세로축이 금리차(음수 가능)면 세로 로그는 불가 → 끄고 이유를 툴팁으로
+  const noLogY = state.yAxis === 'spread';
+  el.mapLogY.disabled = noLogY;
+  el.mapLogY.checked = state.map.logY && !noLogY;
+  $('map-logy-wrap').title = noLogY ? '10Y−2Y 금리차는 음수가 있어 로그 스케일을 쓸 수 없습니다 (10Y/2Y 비율에서 사용 가능)' : '';
+  // 점 크기 슬라이더: 맵에서 원 크기가 VIX로 정해지는 동안은 의미가 없다
+  const vixSize = state.tab === 'map' && state.map.sizeMode === 'vix';
+  el.size.disabled = vixSize;
+  el.size.title = vixSize ? '원 크기가 VIX로 정해지는 중입니다 — ‘원 크기’를 고정으로 바꾸면 조절할 수 있습니다' : '';
+  el.sizeLabel.textContent = state.tab === 'map' ? '원 크기(고정일 때)' : '점 크기';
 }
 
 // ------------------------------------------------------------ 진단 카드
@@ -654,7 +675,6 @@ function writeHash() {
   if (state.start !== FREQUENCIES[state.freq].minDate) p.set('s', state.start);
   if (!state.endAuto && state.end) p.set('e', state.end);
   if (state.tab !== 'map') p.set('t', state.tab);
-  if (state.map.yAxis !== MAP_DEFAULTS.yAxis) p.set('my', state.map.yAxis);
   const next = `#${p.toString()}`;
   if (location.hash !== next) history.replaceState(null, '', next);
 }
@@ -665,7 +685,6 @@ function readHash() {
   if (Y_AXES[p.get('y')]) state.yAxis = p.get('y');
   if (FREQUENCIES[p.get('f')]) state.freq = p.get('f');
   if (p.get('t')) state.tab = p.get('t');
-  if (Y_AXES[p.get('my')]) state.map.yAxis = p.get('my');
   const h = Number(p.get('h'));
   if (horizonsFor(state.freq).includes(h)) state.horizon = h;
   const re = /^\d{4}-\d{2}-\d{2}$/;
@@ -700,7 +719,7 @@ async function updateMeta() {
   const meta = await loadMeta();
   if (!meta) {
     el.meta.textContent = '데이터 출처: FRED (저장소에 보관된 CSV)';
-    el.fresh.textContent = '데이터 출처: FRED';
+    el.fresh.textContent = 'FRED';
     return;
   }
   const when = new Date(meta.updated_at);
@@ -709,7 +728,8 @@ async function updateMeta() {
   const m = meta.series?.BAA?.last, d = meta.series?.DBAA?.last;
   el.meta.textContent = `데이터 출처: FRED · 저장소 CSV 마지막 갱신 ${whenText}` +
     (m ? ` · 월간 최신 ${m}` : '') + (d ? ` · 일간 최신 ${d}` : '');
-  el.fresh.textContent = `FRED · 일간 최신 ${d || '—'} · 월간 최신 ${m ? m.slice(0, 7) : '—'}`;
+  el.fresh.textContent = `FRED 일간 ${d || '—'} · 월간 ${m ? m.slice(0, 7) : '—'}`;
+  el.fresh.title = `FRED 데이터의 마지막 관측일 (일간 ${d || '—'}, 월간 ${m ? m.slice(0, 7) : '—'}). 저장소 CSV 마지막 갱신: ${whenText}`;
 }
 
 /** 세그먼트(라디오 버튼 묶음) 만들기 */
@@ -835,11 +855,7 @@ function bindControls() {
     ev.preventDefault();
   });
 
-  // 사이클 맵 옵션
-  buildSeg(el.mapYSeg, Object.entries(Y_AXES).map(([k, yy]) => [k, yy.menu]), state.map.yAxis, (val) => {
-    state.map.yAxis = val;
-    if (state.rows[state.freq]) render();
-  });
+  // 사이클 맵 옵션 (세로축은 위쪽 공통 조건 '세로축 · 금리 구조'를 따른다)
   buildSeg(el.mapSizeSeg, [['vix', 'VIX'], ['fixed', '고정']], state.map.sizeMode, (val) => {
     state.map.sizeMode = val;
     if (state.rows[state.freq]) render();

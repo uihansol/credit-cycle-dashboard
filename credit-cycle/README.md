@@ -24,6 +24,7 @@ FRED → GitHub Actions → credit-cycle/data/*.csv → GitHub Pages → 브라�
     │   └── app.js           # 상태·컨트롤 연결 (진단 카드, 전망 패널, 흐름 재생, 주소 공유)
     ├── tests/unit.test.mjs  # 순수 함수 유닛 테스트 (`node --test tests/unit.test.mjs`)
     ├── scripts/update_fred.py   # Actions가 실행하는 다운로드·병합 스크립트
+    ├── scripts/stamp_assets.py  # js/css 캐시 무효화용 ?v=해시를 index.html에 기록
     └── data/   # Actions가 채움: BAA/AAA/GS10/GS2, DBAA/DAAA/DGS10/DGS2, HY/HYM(하이일드 OAS), BBB/BBBM(BBB 회사채 OAS), VIX/VIXM(변동성 지수), USREC(침체 판정) + meta.json
 ```
 
@@ -61,6 +62,12 @@ Settings → Pages → Source: **Deploy from a branch** → Branch `main` / `(ro
 - `credit-cycle/data/meta.json`: `updated_at`과 시리즈별 `last` 날짜
 - 대시보드 맨 아래: "저장소 CSV 마지막 갱신 … · 월간 최신 … · 일간 최신 …"
 - 대시보드 **데이터 불러오기** 버튼은 브라우저 캐시를 우회해 CSV를 다시 읽습니다. (Pages 반영까지 1~2분 걸릴 수 있음)
+
+## 5-1. 배포 직후 옛 화면이 보일 때 (캐시)
+GitHub Pages는 파일을 브라우저에 약 10분간 캐시시킵니다. 이 대시보드는 자바스크립트가 여러 파일이라 일부만 옛 버전이 남으면 화면이 깨질 수 있어서,
+`scripts/stamp_assets.py`가 js/css 내용의 해시를 `index.html`의 주소(`?v=해시`)와 import map에 넣습니다. 코드를 고치면 주소가 바뀌어 항상 짝이 맞는 새 파일을 받습니다.
+Actions가 실행될 때마다 자동으로 갱신·커밋하므로(코드가 그대로면 변화 없음) 따로 할 일은 없습니다. 직접 배포한다면 `python credit-cycle/scripts/stamp_assets.py`를 한 번 실행하세요.
+index.html 자체가 캐시돼 있으면 최대 10분 뒤 또는 강력 새로고침(Ctrl+Shift+R)으로 바뀝니다.
 
 ## 6. 로컬에서 보기
 `index.html`을 더블클릭하면 fetch가 막힙니다. `credit-cycle` 폴더에서 `python -m http.server` 후 http://localhost:8000 으로 여세요.

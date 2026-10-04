@@ -16,6 +16,7 @@ import {
 } from '../js/forecast.js';
 import { buildOverlays } from '../js/overlays.js';
 import { parseFredCsv } from '../js/data-loader.js';
+import { detectRepo, getToken, setToken, runServerUpdate, RefreshError } from '../js/server-refresh.js';
 import { VERSIONS, Y_AXES, FREQUENCIES, REQUIRED_KEYS, OPTIONAL_KEYS } from '../js/config.js';
 import { existsSync } from 'node:fs';
 
@@ -352,4 +353,65 @@ test('실데이터: V7(BBB)은 이어 붙여 10년 이상 이력을 갖는다', 
     assert.ok(sp.offset !== null, `${fk} offset`);
     assert.ok(years > 30, `${fk}: ${years.toFixed(1)}년`);
   }
+});
+
+// ------------------------------------------------------------ 서버 갱신 (GitHub Actions 호출) — fetch 모의
+function mockGithub({ sequence, headShas = ['aaa', 'aaa'], dispatchStatus = 204, runsStatus = 200 }) {
+  const calls = [];
+  let runsCall = 0, shaCall = 0;
+  globalThis.fetch = async (url, init = {}) => {
+    calls.push({ url, method: init.method || 'GET', auth: init.headers?.Authorization });
+    const json = (status, body) => ({ ok: status < 400, status, json: async () => body });
+    if (/\/dispatches$/.test(url)) return json(dispatchStatus, null);
+    if (/\/runs\?/.test(url)) {
+      if (runsStatus !== 200) return json(runsStatus, {});
+      const r = sequence[Math.min(runsCall++, sequence.length - 1)];
+      return json(200, { workflow_runs: r });
+    }
+    if (/\/commits\//.test(url)) return json(200, { sha: headShas[Math.min(shaCall++, headShas.length - 1)] });
+    return json(404, {});
+  };
+  return calls;
+}
+const run = (id, status, conclusion) => ({ id, status, conclusion, html_url: `https://x/runs/${id}` });
+const FAST = { intervalMs: 1, timeoutMs: 2000, repo: 'o/r' };
+
+test('detectRepo: github.io 주소에서 저장소 추정', () => {
+  assert.equal(detectRepo({ hostname: 'uihansol.github.io', pathname: '/credit-cycle-dashboard/credit-cycle/' }), 'uihansol/credit-cycle-dashboard');
+  assert.equal(detectRepo({ hostname: 'localhost', pathname: '/' }, 'a/b'), 'a/b');
+});
+
+test('토큰 저장소가 없는 환경(Node)에서도 예외 없이 빈 값', () => {
+  assert.equal(getToken(), '');
+  assert.equal(setToken('x'), false);
+});
+
+test('runServerUpdate: 새 실행을 추적하고, 새 커밋이 생겼으면 dataChanged=true', async () => {
+  const calls = mockGithub({ sequence: [[run(5, 'completed', 'success')], [run(5, 'completed', 'success')], [run(6, 'queued', null), run(5, 'completed', 'success')], [run(6, 'in_progress', null)], [run(6, 'completed', 'success')]], headShas: ['old', 'new'] });
+  const seen = [];
+  const r = await runServerUpdate('tok', { ...FAST, onStatus: (m) => seen.push(m) });
+  assert.equal(r.dataChanged, true);
+  assert.equal(r.runUrl, 'https://x/runs/6');
+  assert.ok(calls.some((c) => c.method === 'POST' && /dispatches$/.test(c.url)));
+  assert.ok(calls.every((c) => c.auth === 'Bearer tok'));
+  assert.ok(seen.length >= 2);
+});
+
+test('runServerUpdate: 새 데이터가 없으면 dataChanged=false', async () => {
+  mockGithub({ sequence: [[run(5, 'completed', 'success')], [run(5, 'completed', 'success')], [run(6, 'completed', 'success'), run(5, 'completed', 'success')]], headShas: ['same', 'same'] });
+  assert.equal((await runServerUpdate('tok', FAST)).dataChanged, false);
+});
+
+test('runServerUpdate: 오래된 실행(기준선 이하)은 새 실행으로 오인하지 않는다', async () => {
+  mockGithub({ sequence: [[run(5, 'completed', 'success')]] });
+  await assert.rejects(runServerUpdate('tok', { ...FAST, timeoutMs: 40 }), /제한 시간/);
+});
+
+test('runServerUpdate: 실패한 실행 / 권한 오류를 구분해 알린다', async () => {
+  mockGithub({ sequence: [[run(5, 'completed', 'success')], [run(5, 'completed', 'success')], [run(6, 'completed', 'failure')]] });
+  await assert.rejects(runServerUpdate('tok', FAST), (e) => e instanceof RefreshError && /실패/.test(e.message) && e.url === 'https://x/runs/6');
+  mockGithub({ sequence: [[]], dispatchStatus: 403 });
+  await assert.rejects(runServerUpdate('tok', FAST), (e) => e.auth === true && /권한/.test(e.message));
+  mockGithub({ sequence: [[]], runsStatus: 401 });
+  await assert.rejects(runServerUpdate('bad', FAST), (e) => e.auth === true && /토큰/.test(e.message));
 });

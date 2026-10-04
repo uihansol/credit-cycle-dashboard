@@ -7,7 +7,10 @@ on:
       - "credit-cycle/**"
       - ".github/workflows/update-fred-credit-cycle.yml"
   schedule:
-    - cron: "15 2 * * 1-5"   # 평일 UTC 02:15 (한국시간 11:15)
+    - cron: "15 2 * * 1-5"   # 평일 UTC 02:15 (한국시간 11:15) — 전날 발표분
+    # FRED 일간 금리(DGS10 등)는 Fed H.15 발표(미국 동부 16:15 = UTC 20:15/21:15) 직후에 올라온다.
+    # 하루 한 번(02:15)만 받으면 최신 관측일이 항상 하루 더 늦으므로 발표 뒤 한 번 더 받는다.
+    - cron: "0 22 * * 1-5"   # 평일 UTC 22:00 (한국시간 다음날 07:00) — 당일 발표분
   workflow_dispatch:
     inputs:
       full_refresh:

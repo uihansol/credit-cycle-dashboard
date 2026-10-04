@@ -18,6 +18,9 @@ import {
   renderTimeSeries, renderTrajectory, renderCycleMap, setTrajectoryMarkerSize, clearChart, COLORS,
 } from './charts.js';
 import { buildOverlays } from './overlays.js';
+import {
+  getToken, setToken, clearToken, runServerUpdate, waitForSiteUpdate, RefreshError, detectRepo, WORKFLOW_FILE,
+} from './server-refresh.js';
 
 // ------------------------------------------------------------ 상태
 const state = {
@@ -62,6 +65,8 @@ const el = {
   optArrows: $('opt-arrows'), optRecent: $('opt-recent'), optForecast: $('opt-forecast'),
   colorMode: $('color-mode'),
   tabs: document.querySelectorAll('[role="tab"][data-tab]'),
+  dlg: $('refresh-dialog'), dlgToken: $('refresh-token'), dlgMsg: $('refresh-dialog-msg'),
+  dlgClear: $('refresh-clear'), dlgLink: $('refresh-actions-link'), refreshSettings: $('refresh-settings'),
   mapPlay: $('map-play'), chartMap: $('chart-map'), chartVix: $('chart-vix'), mapSub: $('map-sub'), mapVixNow: $('map-vix-now'),
   mapSizeSeg: $('map-size-seg'), mapHint: $('map-hint'), viewTitle: $('view-title'), sizeLabel: $('size-label'),
   viewGroups: document.querySelectorAll('[data-tabs]'),
@@ -733,6 +738,57 @@ async function loadAndRender({ refresh = false } = {}) {
   }
 }
 
+// ------------------------------------------------------------ 서버에서 최신 데이터 받기
+let serverBusy = false;
+
+function showDialog(msg = '') {
+  el.dlgToken.value = '';
+  el.dlgToken.placeholder = getToken() ? '(저장된 토큰이 있습니다 — 바꾸려면 새 토큰 입력)' : 'github_pat_…';
+  el.dlgClear.hidden = !getToken();
+  el.dlgMsg.hidden = !msg;
+  el.dlgMsg.textContent = msg;
+  el.dlgLink.href = `https://github.com/${detectRepo()}/actions/workflows/${WORKFLOW_FILE}`;
+  if (!el.dlg.open) el.dlg.showModal();
+}
+
+/** ↻ 버튼: 서버(GitHub Actions)에 갱신을 요청 → 끝나면 새 CSV 를 다시 읽는다. 토큰이 없으면 안내 창을 연다. */
+async function refreshFromServer() {
+  if (serverBusy) return;
+  const token = getToken();
+  if (!token) { showDialog(); return; }
+  serverBusy = true;
+  el.reload.disabled = true;
+  try {
+    const prev = (await loadMeta())?.updated_at;
+    const { dataChanged } = await runServerUpdate(token, { onStatus: setStatus });
+    let landed = true;
+    if (dataChanged) landed = await waitForSiteUpdate(prev, { onStatus: setStatus });
+    await loadAndRender({ refresh: true });
+    await updateMeta();
+    flashStatus(!dataChanged ? '서버 확인 완료 — 새로 올라온 FRED 데이터가 없어 이미 최신입니다'
+      : landed ? '서버에서 최신 데이터를 받아 갱신했습니다' : '서버는 갱신했지만 사이트 반영이 늦어지고 있습니다 — 잠시 뒤 다시 눌러 주세요');
+  } catch (err) {
+    console.error(err);
+    setStatus('');
+    if (err instanceof RefreshError && err.auth) showDialog(err.message);
+    else {
+      showNotice('error', `<p><strong>서버 갱신에 실패했습니다.</strong> ${escapeHtml(err.message || String(err))}${
+        err.url ? ` <a href="${err.url}" target="_blank" rel="noopener">Actions 실행 보기</a>` : ''}</p>`, 'refresh');
+    }
+  } finally {
+    serverBusy = false;
+    el.reload.disabled = false;
+  }
+}
+
+/** 결과 문구를 잠시 보여 주고 지운다 */
+let flashTimer = null;
+function flashStatus(text, ms = 9000) {
+  setStatus(text);
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => setStatus(''), ms);
+}
+
 async function updateMeta() {
   const meta = await loadMeta();
   if (!meta) {
@@ -833,7 +889,20 @@ function bindControls() {
     if (state.tab === 'trajectory') setTrajectoryMarkerSize(el.chartTraj, state.markerSize);
     else if (state.tab === 'map' && state.map.sizeMode === 'fixed' && state.rows[state.freq]) render();
   });
-  el.reload.addEventListener('click', () => loadAndRender({ refresh: true }));
+  el.reload.addEventListener('click', refreshFromServer);
+  el.refreshSettings.addEventListener('click', () => showDialog());
+  $('refresh-close').addEventListener('click', () => el.dlg.close());
+  $('refresh-clear').addEventListener('click', () => { clearToken(); el.dlg.close(); flashStatus('저장된 토큰을 삭제했습니다'); });
+  $('refresh-reread').addEventListener('click', () => { el.dlg.close(); loadAndRender({ refresh: true }).then(() => flashStatus('저장된 CSV를 다시 읽었습니다 (서버 갱신은 하지 않음)')); });
+  $('refresh-save').addEventListener('click', () => {
+    const t = el.dlgToken.value.trim();
+    if (t) {
+      if (!/^[\w-]{20,}$/.test(t)) { showDialog('토큰 형식이 올바르지 않습니다. github_pat_… 으로 시작하는 문자열 전체를 붙여 넣으세요.'); return; }
+      if (!setToken(t)) { showDialog('이 브라우저에서는 토큰을 저장할 수 없습니다 (시크릿 모드 등).'); return; }
+    } else if (!getToken()) { showDialog('토큰을 입력해 주세요.'); return; }
+    el.dlg.close();
+    refreshFromServer();
+  });
   [el.play, el.mapPlay].forEach((b) => b.addEventListener('click', () => (playTimer ? stopPlay() : startPlay())));
   el.zoom.addEventListener('click', () => {
     state.zoomCurrent = !state.zoomCurrent;

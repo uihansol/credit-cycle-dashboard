@@ -40,7 +40,7 @@ Settings → Actions → General
 ## 3. 첫 데이터 받기
 Actions 탭 → **Update FRED data (credit-cycle)** → **Run workflow**.
 첫 실행은 전체 기간(월간 1976-06-01~, 일간 1986-01-02~, 하이일드 OAS 1996-12-31~, 침체판정 1976~)을 받고 `credit-cycle/data/`에 커밋합니다 (1~2분).
-이후에는 평일 UTC 02:15(한국 11:15)마다 최근 120일만 다시 받아 병합합니다. 같은 날짜는 새 값이 우선이라 FRED 수정치도 반영됩니다.
+이후에는 평일 하루 두 번 — UTC 02:15(한국 11:15)와 UTC 22:00(한국 07:00) — 최근 120일만 다시 받아 병합합니다. FRED의 일간 금리는 Fed H.15 발표(미국 동부 16:15 = UTC 20:15/21:15) 직후에 올라오므로, 22:00 실행이 당일 발표분을 바로 받아 옵니다(02:15 한 번만 받으면 최신 관측일이 항상 하루 더 늦습니다). 같은 날짜는 새 값이 우선이라 FRED 수정치도 반영됩니다.
 
 수동 실행 옵션: `full_refresh`(전체 재다운로드), `lookback_days`(증분 기간).
 
@@ -62,6 +62,15 @@ Settings → Pages → Source: **Deploy from a branch** → Branch `main` / `(ro
 - `credit-cycle/data/meta.json`: `updated_at`과 시리즈별 `last` 날짜
 - 대시보드 맨 아래: "저장소 CSV 마지막 갱신 … · 월간 최신 … · 일간 최신 …"
 - 대시보드 **데이터 불러오기** 버튼은 브라우저 캐시를 우회해 CSV를 다시 읽습니다. (Pages 반영까지 1~2분 걸릴 수 있음)
+
+## 5-0. ↻ 버튼으로 최신 데이터 바로 받기 (서버 갱신)
+제목 옆 ↻ 버튼은 **서버(GitHub Actions)에 갱신을 요청**합니다: 워크플로 실행 → 서버가 FRED에서 새 값을 받아 `data/*.csv` 갱신·커밋 → 사이트 반영을 확인 → 새 CSV를 다시 읽어 화면을 갱신합니다(보통 1~2분, 진행 상황은 버튼 옆에 표시).
+새로 올라온 FRED 데이터가 없으면 “이미 최신”이라고 알려 줍니다.
+- 브라우저는 여전히 FRED에 직접 접속하지 않습니다. 브라우저가 호출하는 외부 주소는 GitHub API(워크플로 실행 요청)뿐입니다.
+- **처음 한 번 GitHub 토큰이 필요**합니다(버튼을 누르면 안내 창이 열립니다): fine-grained personal access token, *Repository access = 이 저장소만*,
+  *Permissions → Actions: Read and write*. 토큰은 그 브라우저의 localStorage에만 저장됩니다(푸터의 ‘서버 갱신 설정’에서 삭제 가능). 공용 컴퓨터에서는 저장하지 마세요.
+- 토큰이 없어도 ‘토큰 없이 CSV만 다시 읽기’(저장소의 현재 CSV를 캐시 없이 다시 읽음) 또는 Actions 페이지의 “Run workflow”로 갱신할 수 있습니다.
+- 구현: `js/server-refresh.js`, 흐름 연결은 `app.js`의 `refreshFromServer()`.
 
 ## 5-1. 배포 직후 옛 화면이 보일 때 (캐시)
 GitHub Pages는 파일을 브라우저에 약 10분간 캐시시킵니다. 이 대시보드는 자바스크립트가 여러 파일이라 일부만 옛 버전이 남으면 화면이 깨질 수 있어서,

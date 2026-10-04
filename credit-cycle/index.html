@@ -7,31 +7,32 @@
   <meta name="description" content="장단기 금리차와 신용·하이일드 스프레드의 궤적으로 본 미국 거시 사이클 — 현재 국면 진단과 과거 유사 국면 기반 전망">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔄</text></svg>">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
-  <link rel="stylesheet" href="./css/style.css?v=e7b4db07">
+  <link rel="stylesheet" href="./css/style.css?v=6b268dfc">
   <!-- 캐시 무효화: 모듈끼리의 import 도 같은 ?v= 로 받게 매핑한다. 값은 scripts/stamp_assets.py 가 자동으로 채운다. -->
   <script type="importmap">
   {
     "imports": {
-      "./js/config.js": "./js/config.js?v=e7b4db07",
-      "./js/data-loader.js": "./js/data-loader.js?v=e7b4db07",
-      "./js/transform.js": "./js/transform.js?v=e7b4db07",
-      "./js/forecast.js": "./js/forecast.js?v=e7b4db07",
-      "./js/charts.js": "./js/charts.js?v=e7b4db07",
-      "./js/overlays.js": "./js/overlays.js?v=e7b4db07"
+      "./js/config.js": "./js/config.js?v=6b268dfc",
+      "./js/data-loader.js": "./js/data-loader.js?v=6b268dfc",
+      "./js/transform.js": "./js/transform.js?v=6b268dfc",
+      "./js/forecast.js": "./js/forecast.js?v=6b268dfc",
+      "./js/charts.js": "./js/charts.js?v=6b268dfc",
+      "./js/server-refresh.js": "./js/server-refresh.js?v=6b268dfc",
+      "./js/overlays.js": "./js/overlays.js?v=6b268dfc"
     }
   }
   </script>
   <!-- 그래프 라이브러리만 CDN에서 받는다. 데이터는 ./data/*.csv 에서만 읽는다. -->
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8" defer></script>
-  <script type="module" src="./js/app.js?v=e7b4db07"></script>
+  <script type="module" src="./js/app.js?v=6b268dfc"></script>
 </head>
 <body>
   <main class="page">
     <header class="masthead">
       <h1>미국 금리·신용 사이클 탐색기</h1>
-      <span class="build" id="build-info" title="빌드 번호는 GitHub Actions 실행 번호, 뒤의 8자리는 화면 코드(js/css) 버전입니다.">빌드 <!--build:start-->#20 · e7b4db07<!--build:end--></span>
+      <span class="build" id="build-info" title="빌드 번호는 GitHub Actions 실행 번호, 뒤의 8자리는 화면 코드(js/css) 버전입니다.">빌드 <!--build:start-->#18 · 6b268dfc<!--build:end--></span>
       <span class="build build--data" id="data-fresh" title="FRED 데이터 확인 중…">FRED 확인 중…</span>
-      <button type="button" id="reload" class="icon-btn" aria-label="저장된 FRED 데이터 새로 읽기" title="데이터 새로 읽기 (브라우저 캐시를 우회해 CSV를 다시 읽습니다)">
+      <button type="button" id="reload" class="icon-btn" aria-label="서버에서 최신 FRED 데이터 받아 갱신" title="최신 데이터 갱신 — 서버(GitHub Actions)가 FRED에서 새 값을 받아 CSV를 갱신한 뒤 다시 읽습니다">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>
       </button>
       <span id="status" class="status" role="status" aria-live="polite"></span>
@@ -263,8 +264,35 @@
 
     <footer class="footer">
       <p id="data-meta">데이터 출처: FRED (저장소에 보관된 CSV)</p>
-      <p>브라우저는 이 저장소의 ./data/*.csv 파일만 읽습니다. 데이터는 GitHub Actions가 평일마다 갱신합니다.</p>
+      <p>브라우저는 이 저장소의 ./data/*.csv 파일만 읽습니다. 데이터는 GitHub Actions가 평일 하루 두 번(FRED 발표 직후 포함) 갱신하고,
+        제목 옆 ↻ 버튼으로 지금 바로 갱신을 요청할 수도 있습니다. <button type="button" id="refresh-settings" class="linklike">서버 갱신 설정</button></p>
     </footer>
   </main>
+
+  <dialog id="refresh-dialog" class="dialog" aria-labelledby="refresh-dialog-title">
+    <form method="dialog" id="refresh-form">
+      <h2 id="refresh-dialog-title">서버에서 최신 데이터 받기</h2>
+      <p>브라우저는 FRED에 직접 접속하지 않습니다. ↻ 버튼은 이 저장소의 <strong>GitHub Actions</strong>를 실행해 서버가 FRED에서 새 값을 받아
+        CSV를 갱신하게 한 뒤, 갱신된 CSV를 다시 읽어 옵니다. 이를 위해 <strong>GitHub 토큰</strong>이 한 번 필요합니다.</p>
+      <ol class="dialog__steps">
+        <li>GitHub → Settings → Developer settings → <em>Fine-grained personal access tokens</em> → Generate new token</li>
+        <li><em>Repository access</em>: Only select repositories → 이 저장소만 선택</li>
+        <li><em>Permissions → Repository permissions → Actions: Read and write</em> (그 외 권한은 필요 없음)</li>
+      </ol>
+      <label class="dialog__field">
+        <span>토큰</span>
+        <input type="password" id="refresh-token" autocomplete="off" spellcheck="false" placeholder="github_pat_…">
+      </label>
+      <p class="dialog__note">토큰은 <strong>이 브라우저(localStorage)에만</strong> 저장되고, 서버 갱신을 요청할 때 GitHub에만 전송됩니다. 공용 컴퓨터에서는 저장하지 마세요.</p>
+      <p id="refresh-dialog-msg" class="dialog__msg" hidden></p>
+      <div class="dialog__actions">
+        <button type="button" class="button" id="refresh-save">저장하고 지금 갱신</button>
+        <button type="button" class="button button--ghost" id="refresh-reread">토큰 없이 CSV만 다시 읽기</button>
+        <button type="button" class="button button--ghost" id="refresh-clear" hidden>저장된 토큰 삭제</button>
+        <button type="button" class="button button--ghost" id="refresh-close">닫기</button>
+      </div>
+      <p class="dialog__note">토큰이 없어도 <a id="refresh-actions-link" href="https://github.com/uihansol/credit-cycle-dashboard/actions/workflows/update-fred-credit-cycle.yml" target="_blank" rel="noopener">GitHub Actions 페이지</a>의 “Run workflow”로 직접 갱신할 수 있습니다.</p>
+    </form>
+  </dialog>
 </body>
 </html>

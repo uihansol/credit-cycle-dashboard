@@ -32,10 +32,19 @@ export class RefreshError extends Error {
   constructor(message, extra = {}) { super(message); this.name = 'RefreshError'; Object.assign(this, extra); }
 }
 
+/**
+ * GitHub API 호출. GET 은 매번 다른 `_=` 값을 붙여 브라우저 캐시를 피한다.
+ * api.github.com 은 응답에 `Cache-Control: private, max-age=60` 을 붙이는데, 브라우저가 이를 따르면
+ * 실행 목록·최신 커밋이 최대 60초 동안 옛 값으로 보여서 "서버가 실행을 시작하길 기다리는 중…"에서 멈춘 것처럼 되고,
+ * 갱신 전후 커밋 비교도 틀린다. (fetch 의 cache:'no-store' 는 Cache-Control 요청 헤더를 붙여 CORS 사전요청이 막히므로 쓰지 않는다.)
+ */
+let bustSeq = 0;
 async function gh(path, token, init = {}) {
   let res;
+  const url = init.method === 'POST' ? `${API}${path}`
+    : `${API}${path}${path.includes('?') ? '&' : '?'}_=${Date.now()}${bustSeq++}`;
   try {
-    res = await fetch(`${API}${path}`, {
+    res = await fetch(url, {
       ...init,
       headers: {
         Accept: 'application/vnd.github+json',
@@ -69,7 +78,10 @@ export async function runServerUpdate(token, opts = {}) {
   const ref = opts.ref || 'main';
   const say = opts.onStatus || (() => {});
   const every = opts.intervalMs ?? 4000;
-  const deadline = Date.now() + (opts.timeoutMs ?? 4 * 60 * 1000);
+  const t0 = Date.now();
+  const deadline = t0 + (opts.timeoutMs ?? 4 * 60 * 1000);
+  const startDeadline = t0 + (opts.startTimeoutMs ?? 90 * 1000); // 이 안에 새 실행이 안 보이면 안내
+  const secs = () => Math.round((Date.now() - t0) / 1000);
 
   // 기준선: 실행 전 최신 실행 번호와 브랜치 최신 커밋
   const runsPath = `/repos/${repo}/actions/workflows/${WORKFLOW_FILE}/runs?event=workflow_dispatch&per_page=5`;
@@ -88,9 +100,16 @@ export async function runServerUpdate(token, opts = {}) {
     await sleep(every);
     const list = await gh(runsPath, token);
     run = list.workflow_runs.filter((r) => r.id > baseRunId).sort((a, b) => b.id - a.id)[0] || null;
-    if (!run) { say('서버가 실행을 시작하길 기다리는 중…'); continue; }
+    if (!run) {
+      if (Date.now() > startDeadline) {
+        throw new RefreshError('서버가 갱신 작업을 시작하지 않았습니다. 요청은 접수됐으니 Actions 페이지에서 실행 여부를 확인하세요.',
+          { url: `https://github.com/${repo}/actions/workflows/${WORKFLOW_FILE}` });
+      }
+      say(`서버가 실행을 시작하길 기다리는 중… (${secs()}초)`);
+      continue;
+    }
     if (run.status === 'completed') break;
-    say('서버가 FRED에서 최신 데이터를 받는 중…');
+    say(`서버가 FRED에서 최신 데이터를 받는 중… (${secs()}초)`);
   }
   if (!run || run.status !== 'completed') {
     throw new RefreshError('서버 갱신이 제한 시간 안에 끝나지 않았습니다. 잠시 뒤 다시 시도하세요.', { url: run?.html_url });

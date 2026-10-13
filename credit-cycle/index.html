@@ -7,30 +7,30 @@
   <meta name="description" content="장단기 금리차와 신용·하이일드 스프레드의 궤적으로 본 미국 거시 사이클 — 현재 국면 진단과 과거 유사 국면 기반 전망">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔄</text></svg>">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
-  <link rel="stylesheet" href="./css/style.css?v=6b268dfc">
+  <link rel="stylesheet" href="./css/style.css?v=4bbaf834">
   <!-- 캐시 무효화: 모듈끼리의 import 도 같은 ?v= 로 받게 매핑한다. 값은 scripts/stamp_assets.py 가 자동으로 채운다. -->
   <script type="importmap">
   {
     "imports": {
-      "./js/config.js": "./js/config.js?v=6b268dfc",
-      "./js/data-loader.js": "./js/data-loader.js?v=6b268dfc",
-      "./js/transform.js": "./js/transform.js?v=6b268dfc",
-      "./js/forecast.js": "./js/forecast.js?v=6b268dfc",
-      "./js/charts.js": "./js/charts.js?v=6b268dfc",
-      "./js/server-refresh.js": "./js/server-refresh.js?v=6b268dfc",
-      "./js/overlays.js": "./js/overlays.js?v=6b268dfc"
+      "./js/config.js": "./js/config.js?v=4bbaf834",
+      "./js/data-loader.js": "./js/data-loader.js?v=4bbaf834",
+      "./js/transform.js": "./js/transform.js?v=4bbaf834",
+      "./js/forecast.js": "./js/forecast.js?v=4bbaf834",
+      "./js/charts.js": "./js/charts.js?v=4bbaf834",
+      "./js/server-refresh.js": "./js/server-refresh.js?v=4bbaf834",
+      "./js/overlays.js": "./js/overlays.js?v=4bbaf834"
     }
   }
   </script>
   <!-- 그래프 라이브러리만 CDN에서 받는다. 데이터는 ./data/*.csv 에서만 읽는다. -->
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8" defer></script>
-  <script type="module" src="./js/app.js?v=6b268dfc"></script>
+  <script type="module" src="./js/app.js?v=4bbaf834"></script>
 </head>
 <body>
   <main class="page">
     <header class="masthead">
       <h1>미국 금리·신용 사이클 탐색기</h1>
-      <span class="build" id="build-info" title="빌드 번호는 GitHub Actions 실행 번호, 뒤의 8자리는 화면 코드(js/css) 버전입니다.">빌드 <!--build:start-->#18 · 6b268dfc<!--build:end--></span>
+      <span class="build" id="build-info" title="빌드 번호는 GitHub Actions 실행 번호, 뒤의 8자리는 화면 코드(js/css) 버전입니다.">빌드 <!--build:start-->#43 · 4bbaf834<!--build:end--></span>
       <span class="build build--data" id="data-fresh" title="FRED 데이터 확인 중…">FRED 확인 중…</span>
       <button type="button" id="reload" class="icon-btn" aria-label="서버에서 최신 FRED 데이터 받아 갱신" title="최신 데이터 갱신 — 서버(GitHub Actions)가 FRED에서 새 값을 받아 CSV를 갱신한 뒤 다시 읽습니다">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>

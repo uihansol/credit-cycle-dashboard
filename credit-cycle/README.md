@@ -71,6 +71,7 @@ Settings → Pages → Source: **Deploy from a branch** → Branch `main` / `(ro
   *Permissions → Actions: Read and write*. 토큰은 그 브라우저의 localStorage에만 저장됩니다(푸터의 ‘서버 갱신 설정’에서 삭제 가능). 공용 컴퓨터에서는 저장하지 마세요.
 - 토큰이 없어도 ‘토큰 없이 CSV만 다시 읽기’(저장소의 현재 CSV를 캐시 없이 다시 읽음) 또는 Actions 페이지의 “Run workflow”로 갱신할 수 있습니다.
 - 구현: `js/server-refresh.js`, 흐름 연결은 `app.js`의 `refreshFromServer()`.
+- 주의(캐시): `api.github.com` 응답은 `Cache-Control: private, max-age=60`이라 브라우저가 60초간 옛 응답을 재사용합니다. 그러면 새 실행·새 커밋이 안 보여 ‘서버가 실행을 시작하길 기다리는 중…’에서 멈추므로, GET 호출마다 `_=` 값을 붙여 캐시를 피합니다(`fetch`의 `cache:'no-store'`는 CORS 사전요청이 막혀 쓰지 않음). 실행이 90초 안에 안 보이면 Actions 링크와 함께 안내합니다.
 
 ## 5-1. 배포 직후 옛 화면이 보일 때 (캐시)
 GitHub Pages는 파일을 브라우저에 약 10분간 캐시시킵니다. 이 대시보드는 자바스크립트가 여러 파일이라 일부만 옛 버전이 남으면 화면이 깨질 수 있어서,

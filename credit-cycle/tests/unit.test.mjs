@@ -397,6 +397,21 @@ test('runServerUpdate: 새 실행을 추적하고, 새 커밋이 생겼으면 da
   assert.ok(seen.length >= 2);
 });
 
+test('runServerUpdate: GET 마다 캐시 회피 값(_=)이 달라 브라우저 캐시(max-age=60)에 걸리지 않는다', async () => {
+  const calls = mockGithub({ sequence: [[run(5, 'completed', 'success')], [run(5, 'completed', 'success')], [run(6, 'completed', 'success')]], headShas: ['a', 'b'] });
+  await runServerUpdate('tok', FAST);
+  const gets = calls.filter((c) => c.method === 'GET').map((c) => c.url);
+  assert.ok(gets.length >= 4);
+  assert.ok(gets.every((u) => /[?&]_=\d+/.test(u)), '모든 GET 에 _= 필요');
+  assert.equal(new Set(gets.map((u) => u.match(/_=(\d+)/)[1])).size, gets.length, '값이 매번 달라야 함');
+  assert.ok(calls.filter((c) => c.method === 'POST').every((c) => !/_=/.test(c.url)));
+});
+
+test('runServerUpdate: 새 실행이 90초(설정값) 안에 안 보이면 Actions 링크와 함께 안내', async () => {
+  mockGithub({ sequence: [[run(5, 'completed', 'success')]] });
+  await assert.rejects(runServerUpdate('tok', { ...FAST, startTimeoutMs: 30 }), (e) => /시작하지 않았/.test(e.message) && /actions\/workflows/.test(e.url));
+});
+
 test('runServerUpdate: 새 데이터가 없으면 dataChanged=false', async () => {
   mockGithub({ sequence: [[run(5, 'completed', 'success')], [run(5, 'completed', 'success')], [run(6, 'completed', 'success'), run(5, 'completed', 'success')]], headShas: ['same', 'same'] });
   assert.equal((await runServerUpdate('tok', FAST)).dataChanged, false);

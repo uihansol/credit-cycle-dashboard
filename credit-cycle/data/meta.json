@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-10-13T02:45:07Z",
+  "updated_at": "2026-10-13T14:18:49Z",
   "source": "fredgraph.csv",
   "series": {
     "BAA": {
@@ -75,10 +75,10 @@
       "last": "2026-09-01"
     },
     "VIX": {
-      "rows": 9594,
-      "valid": 9292,
+      "rows": 9595,
+      "valid": 9293,
       "first": "1990-01-02",
-      "last": "2026-10-09"
+      "last": "2026-10-12"
     },
     "VIXM": {
       "rows": 441,

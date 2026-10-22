@@ -1,111 +1,96 @@
 {
-  "updated_at": "2026-10-22T00:17:02Z",
+  "updated_at": "2026-10-22T07:35:12Z",
   "source": "fredgraph.csv",
   "series": {
     "BAA": {
       "rows": 604,
       "valid": 604,
       "first": "1976-06-01",
-      "last": "2026-09-01",
-      "error": "BAA: 예상하지 못한 CSV 형식: '<!doctype html>\\n<html lang=\"en\">\\n<head>\\n    <title>Site Maintenance | St. Louis Fed<</title>\\n    <link href=\"https://fonts.googleapis.com/css?family=Open+Sans:300,400,700\" rel=\"stylesheet\">\\n    <link '"
+      "last": "2026-09-01"
     },
     "AAA": {
       "rows": 604,
       "valid": 604,
       "first": "1976-06-01",
-      "last": "2026-09-01",
-      "error": "AAA: 예상하지 못한 CSV 형식: '<!doctype html>\\n<html lang=\"en\">\\n<head>\\n    <title>Site Maintenance | St. Louis Fed<</title>\\n    <link href=\"https://fonts.googleapis.com/css?family=Open+Sans:300,400,700\" rel=\"stylesheet\">\\n    <link '"
+      "last": "2026-09-01"
     },
     "GS10": {
       "rows": 604,
       "valid": 604,
       "first": "1976-06-01",
-      "last": "2026-09-01",
-      "error": "GS10: 예상하지 못한 CSV 형식: '<!doctype html>\\n<html lang=\"en\">\\n<head>\\n    <title>Site Maintenance | St. Louis Fed<</title>\\n    <link href=\"https://fonts.googleapis.com/css?family=Open+Sans:300,400,700\" rel=\"stylesheet\">\\n    <link '"
+      "last": "2026-09-01"
     },
     "GS2": {
       "rows": 604,
       "valid": 604,
       "first": "1976-06-01",
-      "last": "2026-09-01",
-      "error": "GS2: 예상하지 못한 CSV 형식: '<!doctype html>\\n<html lang=\"en\">\\n<head>\\n    <title>Site Maintenance | St. Louis Fed<</title>\\n    <link href=\"https://fonts.googleapis.com/css?family=Open+Sans:300,400,700\" rel=\"stylesheet\">\\n    <link '"
+      "last": "2026-09-01"
     },
     "DBAA": {
-      "rows": 10643,
-      "valid": 10235,
+      "rows": 10644,
+      "valid": 10236,
       "first": "1986-01-02",
-      "last": "2026-10-19",
-      "error": "DBAA: 예상하지 못한 CSV 형식: '<!doctype html>\\n<html lang=\"en\">\\n<head>\\n    <title>Site Maintenance | St. Louis Fed<</title>\\n    <link href=\"https://fonts.googleapis.com/css?family=Open+Sans:300,400,700\" rel=\"stylesheet\">\\n    <link '"
+      "last": "2026-10-20"
     },
     "DAAA": {
-      "rows": 10643,
-      "valid": 10235,
+      "rows": 10644,
+      "valid": 10236,
       "first": "1986-01-02",
-      "last": "2026-10-19",
-      "error": "DAAA: 예상하지 못한 CSV 형식: '<!doctype html>\\n<html lang=\"en\">\\n<head>\\n    <title>Site Maintenance | St. Louis Fed<</title>\\n    <link href=\"https://fonts.googleapis.com/css?family=Open+Sans:300,400,700\" rel=\"stylesheet\">\\n    <link '"
+      "last": "2026-10-20"
     },
     "DGS10": {
-      "rows": 10643,
-      "valid": 10205,
+      "rows": 10644,
+      "valid": 10206,
       "first": "1986-01-02",
-      "last": "2026-10-19",
-      "error": "DGS10: 예상하지 못한 CSV 형식: '<!doctype html>\\n<html lang=\"en\">\\n<head>\\n    <title>Site Maintenance | St. Louis Fed<</title>\\n    <link href=\"https://fonts.googleapis.com/css?family=Open+Sans:300,400,700\" rel=\"stylesheet\">\\n    <link '"
+      "last": "2026-10-20"
     },
     "DGS2": {
-      "rows": 10643,
-      "valid": 10205,
+      "rows": 10644,
+      "valid": 10206,
       "first": "1986-01-02",
-      "last": "2026-10-19",
-      "error": "DGS2: 예상하지 못한 CSV 형식: '<!doctype html>\\n<html lang=\"en\">\\n<head>\\n    <title>Site Maintenance | St. Louis Fed<</title>\\n    <link href=\"https://fonts.googleapis.com/css?family=Open+Sans:300,400,700\" rel=\"stylesheet\">\\n    <link '"
+      "last": "2026-10-20"
     },
     "HY": {
-      "rows": 812,
-      "valid": 804,
+      "rows": 813,
+      "valid": 805,
       "first": "2023-09-26",
-      "last": "2026-10-19",
-      "error": "BAMLH0A0HYM2: 예상하지 못한 CSV 형식: '<!doctype html>\\n<html lang=\"en\">\\n<head>\\n    <title>Site Maintenance | St. Louis Fed<</title>\\n    <link href=\"https://fonts.googleapis.com/css?family=Open+Sans:300,400,700\" rel=\"stylesheet\">\\n    <link '"
+      "last": "2026-10-20"
     },
     "HYM": {
       "rows": 37,
       "valid": 36,
       "first": "2023-10-01",
-      "last": "2026-09-01",
-      "error": "BAMLH0A0HYM2: 예상하지 못한 CSV 형식: '<!doctype html>\\n<html lang=\"en\">\\n<head>\\n    <title>Site Maintenance | St. Louis Fed<</title>\\n    <link href=\"https://fonts.googleapis.com/css?family=Open+Sans:300,400,700\" rel=\"stylesheet\">\\n    <link '"
+      "last": "2026-09-01"
     },
     "BBB": {
-      "rows": 809,
-      "valid": 801,
+      "rows": 810,
+      "valid": 802,
       "first": "2023-09-29",
-      "last": "2026-10-19",
-      "error": "BAMLC0A4CBBB: 예상하지 못한 CSV 형식: '<!doctype html>\\n<html lang=\"en\">\\n<head>\\n    <title>Site Maintenance | St. Louis Fed<</title>\\n    <link href=\"https://fonts.googleapis.com/css?family=Open+Sans:300,400,700\" rel=\"stylesheet\">\\n    <link '"
+      "last": "2026-10-20"
     },
     "BBBM": {
       "rows": 37,
       "valid": 36,
       "first": "2023-10-01",
-      "last": "2026-09-01",
-      "error": "BAMLC0A4CBBB: 예상하지 못한 CSV 형식: '<!doctype html>\\n<html lang=\"en\">\\n<head>\\n    <title>Site Maintenance | St. Louis Fed<</title>\\n    <link href=\"https://fonts.googleapis.com/css?family=Open+Sans:300,400,700\" rel=\"stylesheet\">\\n    <link '"
+      "last": "2026-09-01"
     },
     "VIX": {
-      "rows": 9600,
-      "valid": 9298,
+      "rows": 9601,
+      "valid": 9299,
       "first": "1990-01-02",
-      "last": "2026-10-19",
-      "error": "VIXCLS: 예상하지 못한 CSV 형식: '<!doctype html>\\n<html lang=\"en\">\\n<head>\\n    <title>Site Maintenance | St. Louis Fed<</title>\\n    <link href=\"https://fonts.googleapis.com/css?family=Open+Sans:300,400,700\" rel=\"stylesheet\">\\n    <link '"
+      "last": "2026-10-20"
     },
     "VIXM": {
       "rows": 441,
       "valid": 440,
       "first": "1990-02-01",
-      "last": "2026-09-01",
-      "error": "VIXCLS: 예상하지 못한 CSV 형식: '<!doctype html>\\n<html lang=\"en\">\\n<head>\\n    <title>Site Maintenance | St. Louis Fed<</title>\\n    <link href=\"https://fonts.googleapis.com/css?family=Open+Sans:300,400,700\" rel=\"stylesheet\">\\n    <link '"
+      "last": "2026-09-01"
     },
     "USREC": {
       "rows": 609,
       "valid": 609,
       "first": "1976-01-01",
-      "last": "2026-09-01",
-      "error": "USREC: 예상하지 못한 CSV 형식: '<!doctype html>\\n<html lang=\"en\">\\n<head>\\n    <title>Site Maintenance | St. Louis Fed<</title>\\n    <link href=\"https://fonts.googleapis.com/css?family=Open+Sans:300,400,700\" rel=\"stylesheet\">\\n    <link '"
+      "last": "2026-09-01"
     }
   }
 }
